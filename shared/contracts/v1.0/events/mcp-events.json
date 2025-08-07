@@ -1,0 +1,270 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MCPEvent",
+  "description": "MCP 서버 및 도구 실행 이벤트 스키마 (섹션 2.7 기반)",
+  "type": "object",
+  "required": ["eventId", "eventType", "timestamp"],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "이벤트 고유 ID",
+      "examples": ["550e8400-e29b-41d4-a716-446655440000"]
+    },
+    "eventType": {
+      "type": "string",
+      "enum": [
+        "MCPServerRegistered",
+        "MCPServerUpdated",
+        "MCPServerDeregistered",
+        "MCPServerConnectionEstablished",
+        "MCPServerConnectionLost",
+        "ToolsDiscovered",
+        "ToolUpdated",
+        "ExecutionStarted",
+        "ExecutionCompleted",
+        "ExecutionFailed",
+        "ExecutionCancelled"
+      ],
+      "description": "이벤트 타입",
+      "examples": ["ExecutionCompleted"]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "이벤트 발생 시간",
+      "examples": ["2024-01-15T10:30:00Z"]
+    },
+    "serverId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "MCP 서버 ID (서버 관련 이벤트)",
+      "examples": ["660e8400-e29b-41d4-a716-446655440001"]
+    },
+    "executionId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "실행 ID (실행 관련 이벤트)",
+      "examples": ["770e8400-e29b-41d4-a716-446655440002"]
+    },
+    "payload": {
+      "type": "object",
+      "description": "이벤트별 페이로드",
+      "oneOf": [
+        {
+          "if": {
+            "properties": {
+              "eventType": {
+                "const": "MCPServerRegistered"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "server": {
+                "type": "object",
+                "required": ["name", "type", "endpoint"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "서버명",
+                    "examples": ["SSH Server"]
+                  },
+                  "type": {
+                    "type": "string",
+                    "description": "서버 타입",
+                    "examples": ["ssh"]
+                  },
+                  "endpoint": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "서버 엔드포인트",
+                    "examples": ["ssh://user@192.168.1.100"]
+                  },
+                  "version": {
+                    "type": "string",
+                    "description": "MCP 프로토콜 버전",
+                    "examples": ["1.0.0"]
+                  },
+                  "capabilities": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "서버 기능 목록",
+                    "examples": [["execute_command", "file_transfer"]]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "eventType": {
+                "const": "ExecutionCompleted"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "tool": {
+                "type": "string",
+                "description": "실행된 도구명"
+              },
+              "params": {
+                "type": "object",
+                "additionalProperties": true,
+                "description": "실행 매개변수"
+              },
+              "result": {
+                "type": "object",
+                "additionalProperties": true,
+                "description": "실행 결과",
+                "examples": [{"cpu_usage": 45.2, "load_average": [1.2, 1.1, 1.0]}]
+              },
+              "duration": {
+                "type": "integer",
+                "description": "실행 시간 (밀리초)",
+                "examples": [1250]
+              },
+              "exitCode": {
+                "type": "integer",
+                "description": "종료 코드 (해당하는 경우)"
+              },
+              "output": {
+                "type": "string",
+                "description": "실행 출력"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "eventType": {
+                "const": "ExecutionFailed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "tool": {
+                "type": "string",
+                "description": "실행된 도구명"
+              },
+              "params": {
+                "type": "object",
+                "additionalProperties": true,
+                "description": "실행 매개변수"
+              },
+              "error": {
+                "type": "string",
+                "description": "오류 메시지",
+                "examples": ["Connection failed: timeout"]
+              },
+              "errorCode": {
+                "type": "string",
+                "description": "오류 코드",
+                "examples": ["TIMEOUT_ERROR"]
+              },
+              "duration": {
+                "type": "integer",
+                "description": "실행 시간 (밀리초)"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "이벤트를 발생시킨 사용자 ID"
+        },
+        "correlationId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "관련 작업 추적을 위한 ID"
+        },
+        "source": {
+          "type": "string",
+          "description": "이벤트 발생 소스",
+          "examples": ["mcp-service", "workflow-engine"]
+        },
+        "version": {
+          "type": "string",
+          "description": "이벤트 스키마 버전",
+          "examples": ["1.0.0"]
+        },
+        "workflowExecutionId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "관련 워크플로우 실행 ID"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "이벤트 태그"
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "eventId": "550e8400-e29b-41d4-a716-446655440000",
+      "eventType": "MCPServerRegistered",
+      "timestamp": "2024-01-15T10:30:00Z",
+      "serverId": "660e8400-e29b-41d4-a716-446655440001",
+      "payload": {
+        "server": {
+          "name": "SSH Server",
+          "type": "ssh",
+          "endpoint": "ssh://user@192.168.1.100",
+          "version": "1.0.0",
+          "capabilities": ["execute_command", "file_transfer"]
+        }
+      },
+      "metadata": {
+        "userId": "admin",
+        "correlationId": "880e8400-e29b-41d4-a716-446655440003",
+        "source": "mcp-service",
+        "version": "1.0.0"
+      }
+    },
+    {
+      "eventId": "550e8400-e29b-41d4-a716-446655440010",
+      "eventType": "ExecutionCompleted",
+      "timestamp": "2024-01-15T10:35:00Z",
+      "serverId": "660e8400-e29b-41d4-a716-446655440001",
+      "executionId": "770e8400-e29b-41d4-a716-446655440002",
+      "payload": {
+        "tool": "ssh_cpu_check",
+        "params": {
+          "host": "192.168.1.100",
+          "format": "json"
+        },
+        "result": {
+          "cpu_usage": 45.2,
+          "load_average": [1.2, 1.1, 1.0],
+          "cores": 4,
+          "timestamp": "2024-01-15T10:35:00Z"
+        },
+        "duration": 1250,
+        "exitCode": 0
+      },
+      "metadata": {
+        "correlationId": "880e8400-e29b-41d4-a716-446655440004",
+        "source": "mcp-service",
+        "version": "1.0.0",
+        "workflowExecutionId": "990e8400-e29b-41d4-a716-446655440005",
+        "tags": ["monitoring", "system"]
+      }
+    }
+  ]
+}

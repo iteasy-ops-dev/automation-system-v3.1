@@ -1,0 +1,28 @@
+#!/bin/bash
+
+# ========================================
+# 빠른 복원 테스트 스크립트
+# ========================================
+
+LATEST_BACKUP=$(ls -td /Users/leesg/Documents/work_ops/automation-system/backups/*/ | head -1)
+
+echo "🔍 최신 백업 찾기: $LATEST_BACKUP"
+
+if [ -f "$LATEST_BACKUP/smart-restore.sh" ]; then
+    echo "✅ 스마트 복원 스크립트 발견"
+    echo ""
+    echo "복원을 시작하시겠습니까? (y/N)"
+    read -r response
+    
+    if [[ "$response" =~ ^[Yy]$ ]]; then
+        echo "🚀 스마트 복원 시작..."
+        cd "$LATEST_BACKUP"
+        ./smart-restore.sh
+    else
+        echo "❌ 복원 취소됨"
+    fi
+else
+    echo "❌ 스마트 복원 스크립트를 찾을 수 없습니다"
+    echo "사용 가능한 백업:"
+    ls -la /Users/leesg/Documents/work_ops/automation-system/backups/
+fi

@@ -1,0 +1,403 @@
+#!/bin/bash
+
+# ========================================
+# 완벽한 복원 스크립트 v3.0 - 최종 검증 버전
+# 모든 스키마 불일치 문제 완전 해결
+# ========================================
+
+set -e
+
+# 색상 정의
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# 함수: 로그 출력
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+log_success() {
+    echo -e "${GREEN}[✓]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[✗]${NC} $1"
+}
+
+log_warning() {
+    echo -e "${YELLOW}[!]${NC} $1"
+}
+
+log_debug() {
+    echo -e "${CYAN}[DEBUG]${NC} $1"
+}
+
+# 백업 디렉토리 찾기
+PROJECT_DIR="/Users/leesg/Documents/work_ops/automation-system"
+BACKUP_DIR=""
+
+# 인자로 백업 ID 받기
+if [ ! -z "$1" ]; then
+    if [ -d "$PROJECT_DIR/backups/$1" ]; then
+        BACKUP_DIR="$PROJECT_DIR/backups/$1"
+        log_info "지정된 백업 사용: $1"
+    else
+        log_error "백업을 찾을 수 없습니다: $1"
+        exit 1
+    fi
+else
+    # 검증된 백업 우선 사용
+    if [ -d "$PROJECT_DIR/backups/20250804_083504" ]; then
+        BACKUP_DIR="$PROJECT_DIR/backups/20250804_083504"
+        log_info "최신 검증된 백업 사용: 20250804_083504"
+    elif [ -d "$PROJECT_DIR/backups/20250802_165334" ]; then
+        BACKUP_DIR="$PROJECT_DIR/backups/20250802_165334"
+        log_info "검증된 백업 사용: 20250802_165334"
+    else
+        # 가장 최근 백업 찾기
+        BACKUP_DIR=$(ls -dt $PROJECT_DIR/backups/202* 2>/dev/null | head -1)
+        if [ -z "$BACKUP_DIR" ]; then
+            log_error "백업을 찾을 수 없습니다!"
+            exit 1
+        fi
+        log_warning "최근 백업 사용: $(basename $BACKUP_DIR)"
+    fi
+fi
+
+echo ""
+echo "========================================="
+echo "   🔄 완벽한 시스템 복원 v3.0"
+echo "========================================="
+echo "백업: $(basename $BACKUP_DIR)"
+echo "위치: $BACKUP_DIR"
+echo "========================================="
+echo ""
+
+# 사전 검증
+log_info "사전 검증 시작..."
+
+# Docker 실행 확인
+if ! docker info > /dev/null 2>&1; then
+    log_error "Docker가 실행되지 않습니다!"
+    exit 1
+fi
+
+# 백업 파일 확인
+if [ ! -d "$BACKUP_DIR/images" ] || [ ! -d "$BACKUP_DIR/data" ]; then
+    log_error "백업 파일이 불완전합니다!"
+    exit 1
+fi
+
+log_success "사전 검증 완료"
+echo ""
+
+# 1. 시스템 완전 중지
+log_info "1단계: 기존 시스템 완전 중지..."
+cd "$PROJECT_DIR"
+docker-compose down 2>/dev/null || true
+docker-compose down -v 2>/dev/null || true  # 볼륨도 제거 (깨끗한 시작)
+log_success "시스템 중지 완료"
+echo ""
+
+# 2. Docker 이미지 복원
+log_info "2단계: Docker 이미지 복원..."
+cd "$BACKUP_DIR/images"
+IMAGE_COUNT=0
+for image_file in *.tar; do
+    if [ -f "$image_file" ]; then
+        echo "  → $image_file 복원 중..."
+        docker load -i "$image_file" > /dev/null 2>&1
+        IMAGE_COUNT=$((IMAGE_COUNT + 1))
+    fi
+done
+log_success "Docker 이미지 복원 완료 ($IMAGE_COUNT개)"
+echo ""
+
+# 3. 네트워크 생성
+log_info "3단계: Docker 네트워크 준비..."
+cd "$PROJECT_DIR"
+docker network create automation-data 2>/dev/null || true
+docker network create automation-backend 2>/dev/null || true
+docker network create automation-frontend 2>/dev/null || true
+log_success "네트워크 준비 완료"
+echo ""
+
+# 4. 데이터베이스 서비스만 시작
+log_info "4단계: 데이터베이스 서비스 시작..."
+docker-compose up -d postgres mongodb redis minio influxdb
+echo "  대기 중..."
+sleep 20  # 충분한 시작 시간 확보
+log_success "데이터베이스 서비스 시작 완료"
+echo ""
+
+# 5. PostgreSQL 초기화
+log_info "5단계: PostgreSQL 데이터베이스 초기화..."
+
+# 기존 데이터베이스 삭제 및 재생성
+docker exec automation-postgres psql -U postgres << 'EOF' 2>/dev/null || true
+DROP DATABASE IF EXISTS automation;
+CREATE DATABASE automation;
+EOF
+
+# 필수 확장 설치 (순서 중요!)
+log_debug "PostgreSQL 확장 설치..."
+docker exec automation-postgres psql -U postgres -d automation << 'EOF'
+-- 필수 확장 설치
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS citext;
+CREATE EXTENSION IF NOT EXISTS btree_gin;
+
+-- 확장 확인
+SELECT extname, extversion FROM pg_extension WHERE extname IN ('uuid-ossp', 'citext', 'btree_gin');
+EOF
+
+log_success "PostgreSQL 초기화 완료"
+echo ""
+
+# 6. 백업 데이터 복원
+log_info "6단계: 백업 데이터 복원..."
+
+# PostgreSQL 데이터 복원
+PG_BACKUP=$(ls $BACKUP_DIR/data/postgres-full-*.sql 2>/dev/null | head -1)
+if [ -f "$PG_BACKUP" ]; then
+    log_debug "PostgreSQL 데이터 복원 중..."
+    cat "$PG_BACKUP" | docker exec -i automation-postgres psql -U postgres -d automation 2>&1 | grep -E "ERROR|NOTICE" | head -5 || true
+    log_success "PostgreSQL 데이터 복원 완료"
+else
+    log_warning "PostgreSQL 백업 파일 없음"
+fi
+
+# MongoDB 데이터 복원
+MONGO_BACKUP=$(ls $BACKUP_DIR/data/mongodb-*.archive 2>/dev/null | head -1)
+if [ -f "$MONGO_BACKUP" ]; then
+    log_debug "MongoDB 데이터 복원 중..."
+    docker exec -i automation-mongodb mongorestore --archive --db=automation \
+        --username=admin --password=automation_mongo_pass_2024 \
+        --authenticationDatabase=admin --drop < "$MONGO_BACKUP" 2>&1 | grep -E "done dumping|finished" || true
+    log_success "MongoDB 데이터 복원 완료"
+else
+    log_warning "MongoDB 백업 파일 없음"
+fi
+
+echo ""
+
+# 7. 스키마 동기화 (가장 중요!)
+log_info "7단계: Prisma-DB 스키마 완전 동기화..."
+
+log_debug "누락된 컬럼 추가 중..."
+docker exec automation-postgres psql -U postgres -d automation << 'EOF'
+-- ========== devices 테이블 ==========
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS connection_info jsonb DEFAULT '{}'::jsonb;
+
+-- ========== mcp_servers 테이블 ==========
+-- Transport 관련
+ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS transport VARCHAR(20) DEFAULT 'stdio';
+ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS connection_status VARCHAR(20) DEFAULT 'disconnected';
+
+-- 실행 관련
+ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS command VARCHAR(500);
+ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS args TEXT[] DEFAULT ARRAY[]::TEXT[];
+
+-- 설정 관련
+ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS ssh_config JSONB;
+ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS docker_config JSONB;
+ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS http_config JSONB;
+ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS server_info JSONB;
+
+-- 상태 관련
+ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS last_error TEXT;
+ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS environment JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS last_connected_at TIMESTAMP(6);
+ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS error_message TEXT;
+ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;
+
+-- ========== 관련 테이블 생성 ==========
+-- mcp_tools 테이블
+CREATE TABLE IF NOT EXISTS mcp_tools (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    server_id UUID NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    input_schema jsonb DEFAULT '{}'::jsonb,
+    output_schema jsonb DEFAULT '{}'::jsonb,
+    metadata jsonb DEFAULT '{}'::jsonb,
+    is_enabled BOOLEAN DEFAULT true,
+    created_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(server_id, name)
+);
+
+-- mcp_executions 테이블
+CREATE TABLE IF NOT EXISTS mcp_executions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    server_id UUID NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+    tool_name VARCHAR(100) NOT NULL,
+    status VARCHAR(20) DEFAULT 'pending',
+    input_params jsonb DEFAULT '{}'::jsonb,
+    output_result jsonb,
+    error_message TEXT,
+    started_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP(6),
+    duration_ms INTEGER,
+    metadata jsonb DEFAULT '{}'::jsonb,
+    created_by UUID,
+    created_at TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 인덱스 생성 (누락된 경우)
+CREATE INDEX IF NOT EXISTS idx_mcp_executions_server_id ON mcp_executions(server_id);
+CREATE INDEX IF NOT EXISTS idx_mcp_executions_status ON mcp_executions(status);
+CREATE INDEX IF NOT EXISTS idx_mcp_tools_server_id ON mcp_tools(server_id);
+
+-- 결과 확인
+SELECT 
+    'devices' as table_name, 
+    COUNT(*) as column_count 
+FROM information_schema.columns 
+WHERE table_name = 'devices' AND table_schema = 'public'
+UNION ALL
+SELECT 
+    'mcp_servers' as table_name, 
+    COUNT(*) as column_count 
+FROM information_schema.columns 
+WHERE table_name = 'mcp_servers' AND table_schema = 'public';
+EOF
+
+log_success "스키마 동기화 완료"
+echo ""
+
+# 8. Storage 서비스 시작 (Prisma 초기화)
+log_info "8단계: Storage 서비스 시작..."
+cd "$PROJECT_DIR"
+docker-compose up -d storage
+sleep 10
+
+# Prisma 클라이언트 생성
+log_debug "Prisma 클라이언트 생성..."
+docker exec automation-storage npx prisma generate 2>&1 | grep -E "Generated|Error" || true
+
+log_success "Storage 서비스 준비 완료"
+echo ""
+
+# 9. 나머지 서비스 시작
+log_info "9단계: 전체 서비스 시작..."
+
+# Kafka/Zookeeper
+docker-compose up -d zookeeper kafka
+sleep 10
+
+# Gateway
+docker-compose up -d gateway
+sleep 5
+
+# Domain 서비스들
+docker-compose up -d device-service mcp-service llm-service workflow-engine
+sleep 10
+
+# Frontend
+docker-compose up -d main-app
+
+log_success "모든 서비스 시작 완료"
+echo ""
+
+# 10. 서비스 상태 확인
+log_info "10단계: 서비스 상태 확인..."
+sleep 15  # 서비스 안정화 대기
+
+echo ""
+echo "========================================="
+echo "   📊 서비스 상태"
+echo "========================================="
+docker ps --format "table {{.Names}}\t{{.Status}}" | grep automation | head -20
+echo "========================================="
+echo ""
+
+# 11. API 동작 확인
+log_info "11단계: API 동작 확인..."
+
+# 로그인 테스트
+TOKEN=$(curl -s -X POST http://localhost:8080/api/v1/auth/login \
+    -H "Content-Type: application/json" \
+    -d '{"username": "admin", "password": "Admin123!@#"}' 2>/dev/null | jq -r '.accessToken')
+
+if [ ! -z "$TOKEN" ] && [ "$TOKEN" != "null" ]; then
+    log_success "✅ API Gateway: 정상 작동"
+    
+    # Device API 테스트
+    DEVICES=$(curl -s -H "Authorization: Bearer $TOKEN" \
+        http://localhost:8080/api/v1/devices 2>/dev/null | jq '.total')
+    if [ ! -z "$DEVICES" ] && [ "$DEVICES" != "null" ]; then
+        log_success "✅ Device API: 정상 작동 (장비: $DEVICES개)"
+    else
+        log_warning "⚠️ Device API: 시작 중..."
+    fi
+    
+    # MCP API 테스트
+    MCP_SERVERS=$(curl -s -H "Authorization: Bearer $TOKEN" \
+        http://localhost:8080/api/v1/mcp/servers 2>/dev/null | jq '.total')
+    if [ ! -z "$MCP_SERVERS" ] && [ "$MCP_SERVERS" != "null" ]; then
+        log_success "✅ MCP API: 정상 작동 (서버: $MCP_SERVERS개)"
+    else
+        log_warning "⚠️ MCP API: 시작 중..."
+    fi
+else
+    log_warning "⚠️ API Gateway: 시작 중..."
+fi
+
+echo ""
+echo "========================================="
+echo "   ✅ 복원 완료!"
+echo "========================================="
+echo ""
+echo "📌 접속 정보:"
+echo "  • Frontend: http://localhost:3001"
+echo "  • API Gateway: http://localhost:8080"
+echo "  • 계정: admin / Admin123!@#"
+echo ""
+echo "📊 복원된 데이터:"
+echo "  • Docker 이미지: $IMAGE_COUNT개"
+echo "  • 장비: ${DEVICES:-확인중}개"
+echo "  • MCP 서버: ${MCP_SERVERS:-확인중}개"
+echo ""
+echo "========================================="
+echo ""
+
+# 12. 문제 해결 가이드
+if [ "$DEVICES" == "null" ] || [ "$MCP_SERVERS" == "null" ]; then
+    echo "⚠️  일부 서비스가 아직 시작 중입니다."
+    echo ""
+    echo "📝 확인 방법:"
+    echo "  1. 1-2분 후 브라우저에서 확인"
+    echo "  2. docker ps 로 상태 확인"
+    echo "  3. docker logs automation-[service-name] 로 로그 확인"
+    echo ""
+fi
+
+# 13. 최종 검증
+log_info "최종 검증..."
+
+# 중요 테이블 존재 확인
+TABLES=$(docker exec automation-postgres psql -U postgres -d automation -t -c \
+    "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public';")
+
+if [ $TABLES -gt 10 ]; then
+    log_success "데이터베이스 테이블: $TABLES개 확인"
+else
+    log_warning "데이터베이스 테이블 수가 예상보다 적습니다: $TABLES개"
+fi
+
+# 실행 중인 컨테이너 수
+RUNNING=$(docker ps | grep automation | wc -l)
+log_success "실행 중인 서비스: $RUNNING개"
+
+echo ""
+log_success "🎉 시스템 복원이 성공적으로 완료되었습니다!"
+echo ""
+echo "💡 팁: 문제가 있으면 다음 명령으로 로그 확인:"
+echo "  docker logs -f automation-[service-name]"
+echo ""

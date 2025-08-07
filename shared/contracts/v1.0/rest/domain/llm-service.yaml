@@ -1,0 +1,883 @@
+openapi: 3.0.3
+info:
+  title: LLM Service API
+  version: 1.0.0
+  description: LLM 프로바이더 통합 API (섹션 2.5 기반)
+  contact:
+    name: Backend Team - Domains
+    email: backend-domains@automation-system.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8301/api/v1
+    description: Development server
+  - url: http://llm-service:8301/api/v1
+    description: Internal service communication
+
+paths:
+  /llm/chat:
+    post:
+      summary: 대화 요청
+      description: LLM과의 대화를 수행합니다. 섹션 4.1의 의도 분석 및 요약 생성을 지원합니다.
+      operationId: chatWithLLM
+      tags:
+        - Chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+            examples:
+              intent_analysis:
+                summary: 의도 분석 요청
+                value:
+                  messages:
+                    - role: "system"
+                      content: "당신은 IT 인프라 관리 전문가입니다. 사용자의 요청을 분석하여 적절한 작업을 추천해주세요."
+                    - role: "user"
+                      content: "모든 웹 서버의 CPU 사용률을 확인하고 90% 이상인 서버를 재시작해줘"
+                  model: "gpt-4"
+                  temperature: 0.1
+                  maxTokens: 500
+              summary_generation:
+                summary: 결과 요약 생성
+                value:
+                  messages:
+                    - role: "system"
+                      content: "다음 작업 결과를 사용자가 이해하기 쉽게 요약해주세요."
+                    - role: "user"
+                      content: "CPU 사용률 확인 결과: web-server-01: 45%, web-server-02: 92%, web-server-03: 88%. web-server-02를 재시작했습니다."
+                  temperature: 0.3
+                  maxTokens: 200
+      responses:
+        '200':
+          description: 대화 응답 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+              examples:
+                intent_response:
+                  summary: 의도 분석 응답
+                  value:
+                    id: "660e8400-e29b-41d4-a716-446655440001"
+                    model: "gpt-4"
+                    usage:
+                      promptTokens: 120
+                      completionTokens: 85
+                      totalTokens: 205
+                    choices:
+                      - message:
+                          role: "assistant"
+                          content: |
+                            분석된 작업:
+                            1. 웹 서버 그룹의 CPU 사용률 모니터링
+                            2. CPU 사용률 90% 이상인 서버 식별
+                            3. 해당 서버들의 서비스 재시작
+
+                            추천 워크플로우:
+                            - 장비 그룹 "web-servers" 조회
+                            - 각 서버의 현재 CPU 메트릭 수집
+                            - 임계값 (90%) 초과 서버 필터링
+                            - 대상 서버들에 재시작 명령 실행
+                summary_response:
+                  summary: 요약 생성 응답
+                  value:
+                    id: "770e8400-e29b-41d4-a716-446655440002"
+                    model: "gpt-4"
+                    usage:
+                      promptTokens: 95
+                      completionTokens: 42
+                      totalTokens: 137
+                    choices:
+                      - message:
+                          role: "assistant"
+                          content: |
+                            ✅ CPU 모니터링 완료
+                            📊 3대 서버 중 1대 (web-server-02)가 높은 CPU 사용률(92%) 감지
+                            🔄 web-server-02 재시작 완료
+                            
+                            현재 상태: 모든 서버 정상 운영 중
+        '400':
+          description: 잘못된 요청 데이터
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 인증 필요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: 요청 한도 초과
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: LLM 프로바이더 사용 불가
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /llm/models:
+    get:
+      summary: 사용 가능한 모델 목록 조회
+      description: 현재 사용 가능한 LLM 모델들의 목록을 조회합니다.
+      operationId: getAvailableModels
+      tags:
+        - Models
+      parameters:
+        - name: provider
+          in: query
+          schema:
+            type: string
+            enum: [openai, anthropic, google, azure]
+          description: 프로바이더별 필터링
+        - name: capability
+          in: query
+          schema:
+            type: string
+            enum: [chat, completion, embedding, image]
+          description: 기능별 필터링
+      responses:
+        '200':
+          description: 모델 목록 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelsResponse'
+              examples:
+                available_models:
+                  summary: 사용 가능한 모델 목록
+                  value:
+                    models:
+                      - id: "gpt-4"
+                        name: "GPT-4"
+                        provider: "openai"
+                        capabilities: ["chat", "completion"]
+                        contextWindow: 8192
+                        costPer1kTokens:
+                          input: 0.03
+                          output: 0.06
+                        status: "active"
+                        description: "OpenAI의 가장 강력한 언어 모델"
+                      - id: "claude-3-opus"
+                        name: "Claude 3 Opus"
+                        provider: "anthropic"
+                        capabilities: ["chat"]
+                        contextWindow: 200000
+                        costPer1kTokens:
+                          input: 0.015
+                          output: 0.075
+                        status: "active"
+                        description: "Anthropic의 최고 성능 모델"
+        '401':
+          description: 인증 필요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /llm/usage:
+    get:
+      summary: 사용량 조회
+      description: LLM 사용량 및 비용 정보를 조회합니다.
+      operationId: getUsage
+      tags:
+        - Usage
+      parameters:
+        - name: start
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: 조회 시작 시간
+        - name: end
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: 조회 종료 시간
+        - name: provider
+          in: query
+          schema:
+            type: string
+          description: 프로바이더별 필터링
+        - name: model
+          in: query
+          schema:
+            type: string
+          description: 모델별 필터링
+        - name: groupBy
+          in: query
+          schema:
+            type: string
+            enum: [provider, model, user, hour, day]
+            default: day
+          description: 그룹화 기준
+      responses:
+        '200':
+          description: 사용량 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsageResponse'
+              examples:
+                daily_usage:
+                  summary: 일별 사용량
+                  value:
+                    period:
+                      start: "2024-01-15T00:00:00Z"
+                      end: "2024-01-15T23:59:59Z"
+                    summary:
+                      totalRequests: 1250
+                      totalTokens: 1567890
+                      totalCost: 47.15
+                      avgResponseTime: 1250
+                    breakdown:
+                      - provider: "openai"
+                        model: "gpt-4"
+                        requests: 850
+                        tokens:
+                          input: 567890
+                          output: 234567
+                        cost: 32.45
+                        avgResponseTime: 1100
+                      - provider: "anthropic"
+                        model: "claude-3-opus"
+                        requests: 400
+                        tokens:
+                          input: 456789
+                          output: 308654
+                        cost: 14.70
+                        avgResponseTime: 1450
+        '400':
+          description: 잘못된 요청 파라미터
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 인증 필요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /llm/templates:
+    get:
+      summary: 프롬프트 템플릿 목록 조회
+      description: 등록된 프롬프트 템플릿들의 목록을 조회합니다.
+      operationId: getPromptTemplates
+      tags:
+        - Templates
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+          description: 카테고리별 필터링
+          example: "intent_analysis"
+        - name: search
+          in: query
+          schema:
+            type: string
+          description: 템플릿명 검색
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: 템플릿 목록 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplatesResponse'
+        '400':
+          description: 잘못된 요청 파라미터
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 인증 필요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    post:
+      summary: 프롬프트 템플릿 생성
+      description: 새로운 프롬프트 템플릿을 생성합니다.
+      operationId: createPromptTemplate
+      tags:
+        - Templates
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TemplateCreate'
+      responses:
+        '201':
+          description: 템플릿 생성 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+        '400':
+          description: 잘못된 요청 데이터
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 인증 필요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: 중복된 템플릿명
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /llm/stream:
+    post:
+      summary: 스트리밍 대화 요청
+      description: 실시간 스트리밍으로 LLM 응답을 받습니다.
+      operationId: streamChat
+      tags:
+        - Chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StreamChatRequest'
+      responses:
+        '200':
+          description: 스트리밍 응답 시작
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: Server-Sent Events 형태의 스트리밍 응답
+              examples:
+                streaming_response:
+                  summary: 스트리밍 응답 예시
+                  value: |
+                    data: {"type":"start","id":"660e8400-e29b-41d4-a716-446655440001"}
+                    
+                    data: {"type":"token","content":"분석된"}
+                    
+                    data: {"type":"token","content":" 작업:"}
+                    
+                    data: {"type":"done","usage":{"totalTokens":205}}
+        '400':
+          description: 잘못된 요청 데이터
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 인증 필요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    ChatRequest:
+      type: object
+      required:
+        - messages
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+          description: 대화 메시지 배열
+          minItems: 1
+        model:
+          type: string
+          description: 사용할 모델 (지정하지 않으면 자동 선택)
+          example: "gpt-4"
+        temperature:
+          type: number
+          minimum: 0
+          maximum: 2
+          default: 0.7
+          description: 응답의 창의성 수준
+        maxTokens:
+          type: integer
+          minimum: 1
+          maximum: 8192
+          default: 1000
+          description: 최대 응답 토큰 수
+        stream:
+          type: boolean
+          default: false
+          description: 스트리밍 응답 여부
+        topP:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: 누적 확률 임계값
+        frequencyPenalty:
+          type: number
+          minimum: -2
+          maximum: 2
+          description: 빈도 페널티
+        presencePenalty:
+          type: number
+          minimum: -2
+          maximum: 2
+          description: 존재 페널티
+        stop:
+          type: array
+          items:
+            type: string
+          description: 응답 중단 시퀀스
+        metadata:
+          type: object
+          additionalProperties: true
+          description: 추가 메타데이터
+
+    ChatMessage:
+      type: object
+      required:
+        - role
+        - content
+      properties:
+        role:
+          type: string
+          enum: [system, user, assistant]
+          description: 메시지 역할
+          example: "user"
+        content:
+          type: string
+          description: 메시지 내용
+          example: "모든 웹 서버의 CPU 사용률을 확인해줘"
+        name:
+          type: string
+          description: 메시지 발신자명 (선택적)
+
+    ChatResponse:
+      type: object
+      required:
+        - id
+        - model
+        - usage
+        - choices
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: 응답 고유 ID
+          example: "660e8400-e29b-41d4-a716-446655440001"
+        model:
+          type: string
+          description: 사용된 모델
+          example: "gpt-4"
+        usage:
+          $ref: '#/components/schemas/TokenUsage'
+        choices:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatChoice'
+          description: 응답 선택지
+        createdAt:
+          type: string
+          format: date-time
+          description: 생성 시간
+          example: "2024-01-15T10:30:00Z"
+        finishReason:
+          type: string
+          enum: [stop, length, content_filter, tool_calls]
+          description: 완료 이유
+
+    ChatChoice:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          $ref: '#/components/schemas/ChatMessage'
+        finishReason:
+          type: string
+          enum: [stop, length, content_filter]
+          description: 완료 이유
+        index:
+          type: integer
+          description: 선택지 인덱스
+
+    TokenUsage:
+      type: object
+      required:
+        - promptTokens
+        - completionTokens
+        - totalTokens
+      properties:
+        promptTokens:
+          type: integer
+          description: 입력 토큰 수
+          example: 120
+        completionTokens:
+          type: integer
+          description: 출력 토큰 수
+          example: 85
+        totalTokens:
+          type: integer
+          description: 총 토큰 수
+          example: 205
+        cost:
+          type: number
+          description: 예상 비용 (USD)
+          example: 0.006
+
+    ModelInfo:
+      type: object
+      required:
+        - id
+        - name
+        - provider
+        - capabilities
+        - status
+      properties:
+        id:
+          type: string
+          description: 모델 ID
+          example: "gpt-4"
+        name:
+          type: string
+          description: 모델명
+          example: "GPT-4"
+        provider:
+          type: string
+          enum: [openai, anthropic, google, azure]
+          description: 제공업체
+          example: "openai"
+        capabilities:
+          type: array
+          items:
+            type: string
+            enum: [chat, completion, embedding, image]
+          description: 지원 기능
+          example: ["chat", "completion"]
+        contextWindow:
+          type: integer
+          description: 컨텍스트 윈도우 크기
+          example: 8192
+        costPer1kTokens:
+          type: object
+          properties:
+            input:
+              type: number
+              description: 입력 토큰 1K당 비용
+            output:
+              type: number
+              description: 출력 토큰 1K당 비용
+        status:
+          type: string
+          enum: [active, maintenance, deprecated]
+          description: 모델 상태
+          example: "active"
+        description:
+          type: string
+          description: 모델 설명
+        version:
+          type: string
+          description: 모델 버전
+
+    ModelsResponse:
+      type: object
+      required:
+        - models
+      properties:
+        models:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModelInfo'
+        lastUpdated:
+          type: string
+          format: date-time
+          description: 마지막 업데이트 시간
+
+    UsageResponse:
+      type: object
+      required:
+        - period
+        - summary
+        - breakdown
+      properties:
+        period:
+          type: object
+          required:
+            - start
+            - end
+          properties:
+            start:
+              type: string
+              format: date-time
+            end:
+              type: string
+              format: date-time
+        summary:
+          type: object
+          required:
+            - totalRequests
+            - totalTokens
+            - totalCost
+          properties:
+            totalRequests:
+              type: integer
+              description: 총 요청 수
+            totalTokens:
+              type: integer
+              description: 총 토큰 수
+            totalCost:
+              type: number
+              description: 총 비용
+            avgResponseTime:
+              type: number
+              description: 평균 응답 시간 (ms)
+        breakdown:
+          type: array
+          items:
+            $ref: '#/components/schemas/UsageBreakdown'
+
+    UsageBreakdown:
+      type: object
+      required:
+        - provider
+        - model
+        - requests
+        - tokens
+        - cost
+      properties:
+        provider:
+          type: string
+          description: 프로바이더
+        model:
+          type: string
+          description: 모델
+        requests:
+          type: integer
+          description: 요청 수
+        tokens:
+          type: object
+          properties:
+            input:
+              type: integer
+            output:
+              type: integer
+        cost:
+          type: number
+          description: 비용
+        avgResponseTime:
+          type: number
+          description: 평균 응답 시간
+
+    Template:
+      type: object
+      required:
+        - id
+        - name
+        - category
+        - template
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: 템플릿 ID
+        name:
+          type: string
+          description: 템플릿명
+        category:
+          type: string
+          description: 카테고리
+        template:
+          type: string
+          description: 프롬프트 템플릿
+        variables:
+          type: array
+          items:
+            type: string
+          description: 템플릿 변수 목록
+        description:
+          type: string
+          description: 템플릿 설명
+        model:
+          type: string
+          description: 권장 모델
+        parameters:
+          type: object
+          description: 기본 매개변수
+        examples:
+          type: array
+          items:
+            type: object
+          description: 사용 예제
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    TemplateCreate:
+      type: object
+      required:
+        - name
+        - category
+        - template
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        category:
+          type: string
+        template:
+          type: string
+        description:
+          type: string
+        model:
+          type: string
+        parameters:
+          type: object
+        examples:
+          type: array
+          items:
+            type: object
+
+    TemplatesResponse:
+      type: object
+      required:
+        - items
+        - total
+        - limit
+        - offset
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Template'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    StreamChatRequest:
+      allOf:
+        - $ref: '#/components/schemas/ChatRequest'
+        - type: object
+          properties:
+            stream:
+              type: boolean
+              enum: [true]
+              description: 스트리밍은 항상 true
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+        - timestamp
+      properties:
+        error:
+          type: string
+          description: 오류 코드
+          example: "INVALID_MODEL"
+        message:
+          type: string
+          description: 오류 메시지
+          example: "Model 'gpt-5' is not available"
+        timestamp:
+          type: string
+          format: date-time
+          description: 오류 발생 시간
+          example: "2024-01-15T10:30:00Z"
+        details:
+          type: object
+          additionalProperties: true
+          description: 추가 오류 상세 정보
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Chat
+    description: LLM 대화 API
+  - name: Models
+    description: 모델 관리 API
+  - name: Usage
+    description: 사용량 추적 API
+  - name: Templates
+    description: 프롬프트 템플릿 API

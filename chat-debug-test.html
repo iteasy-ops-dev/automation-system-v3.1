@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Debug Test</title>
+    <style>
+        body { font-family: Arial; padding: 20px; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 4px; }
+        .success { border-color: #4ade80; background: #f0fdf4; }
+        .error { border-color: #f87171; background: #fef2f2; }
+        .result { background: #f8f9fa; padding: 10px; margin: 10px 0; border-radius: 4px; font-family: monospace; white-space: pre-wrap; }
+        button { padding: 8px 16px; margin: 5px; border: none; border-radius: 4px; cursor: pointer; }
+        .btn-primary { background: #3b82f6; color: white; }
+        .btn-success { background: #10b981; color: white; }
+        input, textarea { width: 100%; padding: 8px; margin: 5px 0; border: 1px solid #ddd; border-radius: 4px; }
+        textarea { height: 60px; resize: vertical; }
+        h2 { color: #1f2937; margin-top: 0; }
+        h3 { color: #374151; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 Chat Debug Test - 통합 자동화 시스템 v3.1</h1>
+        
+        <!-- 로그인 섹션 -->
+        <div class="test-section" id="auth-section">
+            <h2>1. 로그인 테스트</h2>
+            <input type="text" id="username" placeholder="Username" value="admin">
+            <input type="password" id="password" placeholder="Password" value="Admin123!@#">
+            <button class="btn-primary" onclick="testLogin()">로그인</button>
+            <div class="result" id="auth-result">로그인 버튼을 클릭하세요.</div>
+        </div>
+
+        <!-- API 연결 테스트 -->
+        <div class="test-section" id="api-section">
+            <h2>2. API 연결 테스트</h2>
+            <button class="btn-primary" onclick="testAPIs()">모든 API 테스트</button>
+            <div class="result" id="api-result">API 테스트 버튼을 클릭하세요.</div>
+        </div>
+
+        <!-- WebSocket 테스트 -->
+        <div class="test-section" id="ws-section">
+            <h2>3. WebSocket 연결 테스트</h2>
+            <button class="btn-primary" onclick="testWebSocket()">WebSocket 연결</button>
+            <button class="btn-primary" onclick="disconnectWebSocket()">연결 해제</button>
+            <div class="result" id="ws-result">연결 버튼을 클릭하세요.</div>
+        </div>
+
+        <!-- 채팅 워크플로우 테스트 -->
+        <div class="test-section" id="chat-section">
+            <h2>4. 채팅 워크플로우 테스트</h2>
+            <textarea id="chat-message" placeholder="테스트 메시지를 입력하세요">시스템 정보를 확인해줘</textarea>
+            <button class="btn-success" onclick="testChatWorkflow()">채팅 전송</button>
+            <div class="result" id="chat-result">채팅 버튼을 클릭하세요.</div>
+        </div>
+
+        <!-- MCP 도구 직접 테스트 -->
+        <div class="test-section" id="mcp-section">
+            <h2>5. MCP 도구 직접 테스트</h2>
+            <select id="mcp-tool">
+                <option value="get_config">get_config (시스템 설정)</option>
+                <option value="list_processes">list_processes (프로세스 목록)</option>
+                <option value="list_directory">list_directory (디렉토리 목록)</option>
+            </select>
+            <input type="text" id="mcp-params" placeholder="Parameters (JSON)" value="{}">
+            <button class="btn-success" onclick="testMCPTool()">MCP 도구 실행</button>
+            <div class="result" id="mcp-result">MCP 버튼을 클릭하세요.</div>
+        </div>
+    </div>
+
+    <script>
+        let authToken = null;
+        let socket = null;
+
+        // 로그인 테스트
+        async function testLogin() {
+            const resultDiv = document.getElementById('auth-result');
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                resultDiv.textContent = '로그인 중...';
+                
+                const response = await fetch('http://localhost:8080/api/v1/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+                
+                if (response.ok && data.accessToken) {
+                    authToken = data.accessToken;
+                    resultDiv.textContent = `✅ 로그인 성공!\nToken: ${authToken.substring(0, 50)}...\nUser: ${data.user.username} (${data.user.role})`;
+                    document.getElementById('auth-section').className = 'test-section success';
+                } else {
+                    throw new Error(data.message || '로그인 실패');
+                }
+            } catch (error) {
+                resultDiv.textContent = `❌ 로그인 실패: ${error.message}`;
+                document.getElementById('auth-section').className = 'test-section error';
+            }
+        }
+
+        // API 연결 테스트
+        async function testAPIs() {
+            const resultDiv = document.getElementById('api-result');
+            
+            if (!authToken) {
+                resultDiv.textContent = '❌ 먼저 로그인하세요.';
+                return;
+            }
+
+            resultDiv.textContent = 'API 테스트 중...';
+            const results = [];
+
+            const tests = [
+                { name: 'LLM Models', url: '/api/v1/llm/models' },
+                { name: 'MCP Servers', url: '/api/v1/mcp/servers' },
+                { name: 'Device List', url: '/api/v1/devices' },
+                { name: 'Workflow Health', url: '/api/v1/workflows/health' }
+            ];
+
+            for (const test of tests) {
+                try {
+                    const response = await fetch(`http://localhost:8080${test.url}`, {
+                        headers: { 'Authorization': `Bearer ${authToken}` }
+                    });
+                    
+                    if (response.ok) {
+                        results.push(`✅ ${test.name}: OK`);
+                    } else {
+                        const error = await response.text();
+                        results.push(`❌ ${test.name}: ${response.status} - ${error.substring(0, 100)}`);
+                    }
+                } catch (error) {
+                    results.push(`❌ ${test.name}: ${error.message}`);
+                }
+            }
+
+            resultDiv.textContent = results.join('\n');
+            
+            if (results.every(r => r.startsWith('✅'))) {
+                document.getElementById('api-section').className = 'test-section success';
+            } else {
+                document.getElementById('api-section').className = 'test-section error';
+            }
+        }
+
+        // WebSocket 테스트
+        function testWebSocket() {
+            const resultDiv = document.getElementById('ws-result');
+            
+            if (!authToken) {
+                resultDiv.textContent = '❌ 먼저 로그인하세요.';
+                return;
+            }
+
+            try {
+                resultDiv.textContent = 'WebSocket 연결 중...';
+                
+                // Socket.IO 연결
+                socket = io('http://localhost:8080', {
+                    path: '/ws',
+                    auth: { token: authToken },
+                    extraHeaders: { 'Authorization': `Bearer ${authToken}` }
+                });
+
+                socket.on('connect', () => {
+                    resultDiv.textContent = '✅ WebSocket 연결 성공!\nSession ID: ' + socket.id;
+                    document.getElementById('ws-section').className = 'test-section success';
+                });
+
+                socket.on('disconnect', (reason) => {
+                    resultDiv.textContent = '❌ WebSocket 연결 해제: ' + reason;
+                    document.getElementById('ws-section').className = 'test-section error';
+                });
+
+                socket.on('connect_error', (error) => {
+                    resultDiv.textContent = '❌ WebSocket 연결 실패: ' + error.message;
+                    document.getElementById('ws-section').className = 'test-section error';
+                });
+
+                // 메시지 수신 테스트
+                socket.on('workflow_progress', (data) => {
+                    resultDiv.textContent += '\n📨 Progress: ' + JSON.stringify(data, null, 2);
+                });
+
+                socket.on('chat_response', (data) => {
+                    resultDiv.textContent += '\n💬 Response: ' + JSON.stringify(data, null, 2);
+                });
+
+            } catch (error) {
+                resultDiv.textContent = '❌ WebSocket 오류: ' + error.message;
+                document.getElementById('ws-section').className = 'test-section error';
+            }
+        }
+
+        function disconnectWebSocket() {
+            if (socket) {
+                socket.disconnect();
+                socket = null;
+            }
+        }
+
+        // 채팅 워크플로우 테스트
+        async function testChatWorkflow() {
+            const resultDiv = document.getElementById('chat-result');
+            const message = document.getElementById('chat-message').value;
+            
+            if (!authToken) {
+                resultDiv.textContent = '❌ 먼저 로그인하세요.';
+                return;
+            }
+
+            try {
+                resultDiv.textContent = '채팅 워크플로우 실행 중...';
+                
+                const response = await fetch('http://localhost:8080/api/v1/workflows/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${authToken}`
+                    },
+                    body: JSON.stringify({
+                        message: message,
+                        sessionId: '123e4567-e89b-12d3-a456-426614174000'
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    resultDiv.textContent = `✅ 채팅 워크플로우 성공!\n\n응답: ${data.message}\n\n상세:\n${JSON.stringify(data, null, 2)}`;
+                    document.getElementById('chat-section').className = 'test-section success';
+                } else {
+                    throw new Error(JSON.stringify(data, null, 2));
+                }
+            } catch (error) {
+                resultDiv.textContent = `❌ 채팅 워크플로우 실패:\n${error.message}`;
+                document.getElementById('chat-section').className = 'test-section error';
+            }
+        }
+
+        // MCP 도구 직접 테스트
+        async function testMCPTool() {
+            const resultDiv = document.getElementById('mcp-result');
+            const tool = document.getElementById('mcp-tool').value;
+            const paramsText = document.getElementById('mcp-params').value;
+            
+            if (!authToken) {
+                resultDiv.textContent = '❌ 먼저 로그인하세요.';
+                return;
+            }
+
+            try {
+                resultDiv.textContent = 'MCP 도구 실행 중...';
+                
+                let parameters = {};
+                if (paramsText.trim()) {
+                    parameters = JSON.parse(paramsText);
+                }
+
+                const response = await fetch('http://localhost:8080/api/v1/mcp/execute', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${authToken}`
+                    },
+                    body: JSON.stringify({
+                        serverId: 'cbda6dfa-78a7-41a3-9986-869239873a72',
+                        tool: tool,
+                        parameters: parameters
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    resultDiv.textContent = `✅ MCP 도구 실행 성공!\n\n결과:\n${JSON.stringify(data, null, 2)}`;
+                    document.getElementById('mcp-section').className = 'test-section success';
+                } else {
+                    throw new Error(JSON.stringify(data, null, 2));
+                }
+            } catch (error) {
+                resultDiv.textContent = `❌ MCP 도구 실행 실패:\n${error.message}`;
+                document.getElementById('mcp-section').className = 'test-section error';
+            }
+        }
+
+        // Socket.io 스크립트 로드
+        const socketScript = document.createElement('script');
+        socketScript.src = 'https://cdn.socket.io/socket.io-4.5.0.min.js';
+        document.head.appendChild(socketScript);
+    </script>
+</body>
+</html>

@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>채팅 시스템 테스트</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+            background-color: #f8fafc;
+        }
+        .container {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+        }
+        .input-group {
+            margin-bottom: 16px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #374151;
+        }
+        input[type="text"], textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+        textarea {
+            height: 80px;
+            resize: vertical;
+        }
+        button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-right: 8px;
+        }
+        button:hover {
+            background: #2563eb;
+        }
+        button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+        .result {
+            background: #f3f4f6;
+            border-radius: 8px;
+            padding: 16px;
+            margin-top: 16px;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .success {
+            background: #d1fae5;
+            border-left: 4px solid #10b981;
+        }
+        .error {
+            background: #fee2e2;
+            border-left: 4px solid #ef4444;
+        }
+        .loading {
+            opacity: 0.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>채팅 시스템 테스트</h1>
+        <p>백엔드 API 직접 테스트 도구</p>
+        
+        <div class="input-group">
+            <label for="token">인증 토큰:</label>
+            <input type="text" id="token" placeholder="Bearer 토큰 (자동 획득 가능)">
+            <button onclick="getToken()">토큰 자동 획득</button>
+        </div>
+        
+        <div class="input-group">
+            <label for="message">메시지:</label>
+            <textarea id="message" placeholder="테스트할 메시지를 입력하세요...">안녕하세요</textarea>
+        </div>
+        
+        <div class="input-group">
+            <button onclick="sendMessage()">메시지 전송</button>
+            <button onclick="testAllCases()">전체 테스트</button>
+            <button onclick="clearResult()">결과 지우기</button>
+        </div>
+        
+        <div id="result" class="result"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8080';
+        let currentToken = '';
+        
+        function log(message, type = 'info') {
+            const resultDiv = document.getElementById('result');
+            const timestamp = new Date().toLocaleTimeString();
+            const className = type === 'error' ? 'error' : type === 'success' ? 'success' : '';
+            
+            resultDiv.innerHTML += `<div class="${className}">[${timestamp}] ${message}</div>\n`;
+            resultDiv.scrollTop = resultDiv.scrollHeight;
+        }
+        
+        async function getToken() {
+            try {
+                log('토큰 획득 중...', 'info');
+                
+                const response = await fetch(`${API_BASE}/api/v1/auth/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        username: 'admin',
+                        password: 'Admin123!@#'
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                currentToken = data.accessToken;
+                document.getElementById('token').value = currentToken;
+                
+                log('✅ 토큰 획득 성공', 'success');
+                log(`토큰: ${currentToken.substring(0, 50)}...`, 'info');
+                
+            } catch (error) {
+                log(`❌ 토큰 획득 실패: ${error.message}`, 'error');
+            }
+        }
+        
+        async function sendMessage() {
+            const token = document.getElementById('token').value || currentToken;
+            const message = document.getElementById('message').value;
+            
+            if (!token) {
+                log('❌ 토큰이 필요합니다. "토큰 자동 획득"을 먼저 클릭하세요.', 'error');
+                return;
+            }
+            
+            if (!message.trim()) {
+                log('❌ 메시지를 입력하세요.', 'error');
+                return;
+            }
+            
+            try {
+                log(`📤 메시지 전송: "${message}"`, 'info');
+                
+                const response = await fetch(`${API_BASE}/api/v1/workflows/chat`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        message: message,
+                        sessionId: generateUUID()
+                    })
+                });
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                }
+                
+                const data = await response.json();
+                log('✅ 응답 성공', 'success');
+                log(`응답 내용: ${JSON.stringify(data, null, 2)}`, 'info');
+                
+                if (data.message) {
+                    log(`💬 AI 응답: "${data.message}"`, 'success');
+                }
+                
+            } catch (error) {
+                log(`❌ 전송 실패: ${error.message}`, 'error');
+            }
+        }
+        
+        async function testAllCases() {
+            const testCases = [
+                "안녕하세요",
+                "5 + 3",
+                "100 / 4", 
+                "도움말",
+                "모든 웹 서버의 CPU 사용률을 확인해줘",
+                "감사합니다"
+            ];
+            
+            log('🧪 전체 테스트 시작...', 'info');
+            
+            // 토큰 획득
+            if (!currentToken) {
+                await getToken();
+                if (!currentToken) {
+                    log('❌ 토큰 획득 실패로 테스트 중단', 'error');
+                    return;
+                }
+            }
+            
+            for (let i = 0; i < testCases.length; i++) {
+                const testMessage = testCases[i];
+                log(`\n--- 테스트 ${i + 1}/${testCases.length}: "${testMessage}" ---`, 'info');
+                
+                document.getElementById('message').value = testMessage;
+                await sendMessage();
+                
+                // 1초 대기
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+            
+            log('\n🎉 전체 테스트 완료!', 'success');
+        }
+        
+        function clearResult() {
+            document.getElementById('result').innerHTML = '';
+        }
+        
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                const r = Math.random() * 16 | 0;
+                const v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+        
+        // 페이지 로드 시 자동으로 토큰 획득
+        window.addEventListener('load', () => {
+            log('📋 채팅 시스템 테스트 도구 준비됨', 'info');
+            log('💡 "토큰 자동 획득" 버튼을 클릭하여 시작하세요', 'info');
+        });
+    </script>
+</body>
+</html>

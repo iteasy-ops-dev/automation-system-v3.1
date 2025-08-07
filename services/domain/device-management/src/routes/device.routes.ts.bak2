@@ -1,0 +1,87 @@
+/**
+ * Device Routes - Express 라우터
+ * device-service.yaml 계약 엔드포인트 매핑
+ */
+
+import { Router } from 'express';
+import { body, query, param } from 'express-validator';
+import { DeviceController } from '../controllers/device.controller';
+
+export function createDeviceRoutes(controller: DeviceController): Router {
+  const router = Router();
+
+  // ============ Device CRUD Routes ============
+
+  /**
+   * GET /api/v1/devices - 장비 목록 조회
+   */
+  router.get('/devices', [
+    query('groupId').optional().isUUID().withMessage('Invalid groupId format'),
+    query('status').optional().isIn(['active', 'inactive', 'maintenance', 'error']).withMessage('Invalid status'),
+    query('type').optional().isIn(['server', 'network', 'storage', 'iot']).withMessage('Invalid type'),
+    query('tags').optional().isString().withMessage('Tags must be comma-separated string'),
+    query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1-100'),
+    query('offset').optional().isInt({ min: 0 }).withMessage('Offset must be >= 0')
+  ], controller.getDevices.bind(controller));
+
+  /**
+   * POST /api/v1/devices - 장비 등록
+   */
+  router.post('/devices', [
+    body('name').notEmpty().isString().withMessage('Device name is required'),
+    body('type').isIn(['server', 'network', 'storage', 'iot']).withMessage('Invalid device type'),
+    body('groupId').optional().isUUID().withMessage('Invalid groupId format'),
+    body('metadata').optional().isObject().withMessage('Metadata must be an object'),
+    body('tags').optional().isArray().withMessage('Tags must be an array')
+  ], controller.createDevice.bind(controller));
+
+  /**
+
+  /**
+   * GET /api/v1/devices/{id} - 장비 상세 조회
+   */
+  router.get('/devices/:id', [
+    param('id').isUUID().withMessage('Invalid device ID format')
+  ], controller.getDeviceById.bind(controller));
+
+  /**
+   * PUT /api/v1/devices/{id} - 장비 정보 수정
+   */
+  router.put('/devices/:id', [
+    param('id').isUUID().withMessage('Invalid device ID format'),
+    body('name').optional().isString().withMessage('Device name must be string'),
+    body('type').optional().isIn(['server', 'network', 'storage', 'iot']).withMessage('Invalid device type'),
+    body('status').optional().isIn(['active', 'inactive', 'maintenance', 'error']).withMessage('Invalid status'),
+    body('groupId').optional().isUUID().withMessage('Invalid groupId format'),
+    body('connectionInfo').optional().isObject().withMessage('Connection info must be an object'),
+    body('metadata').optional().isObject().withMessage('Metadata must be an object'),
+    body('tags').optional().isArray().withMessage('Tags must be an array')
+  ], controller.updateDevice.bind(controller));
+
+  /**
+   * DELETE /api/v1/devices/{id} - 장비 삭제
+   */
+  router.delete('/devices/:id', [
+    param('id').isUUID().withMessage('Invalid device ID format')
+  ], controller.deleteDevice.bind(controller));
+
+  /**
+   * POST /api/v1/devices/{id}/status - 하트비트 처리
+   */
+  router.post('/devices/:id/status', [
+    param('id').isUUID().withMessage('Invalid device ID format'),
+    body('status').isIn(['active', 'inactive', 'maintenance', 'error']).withMessage('Invalid status'),
+    body('metrics').optional().isObject().withMessage('Metrics must be an object'),
+    body('metrics.cpu').optional().isFloat({ min: 0, max: 100 }).withMessage('CPU must be 0-100'),
+    body('metrics.memory').optional().isFloat({ min: 0, max: 100 }).withMessage('Memory must be 0-100'),
+    body('metrics.disk').optional().isFloat({ min: 0, max: 100 }).withMessage('Disk must be 0-100'),
+    body('metadata').optional().isObject().withMessage('Metadata must be an object')
+  ], controller.processHeartbeat.bind(controller));
+
+  /**
+   * GET /api/v1/devices/health - 전체 장비 헬스 요약
+   */
+  router.get('/devices/health', controller.getDeviceHealthSummary?.bind(controller));
+
+  return router;
+}

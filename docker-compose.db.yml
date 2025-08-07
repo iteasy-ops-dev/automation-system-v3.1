@@ -1,0 +1,175 @@
+# 데이터베이스 전용 Docker Compose
+# 개발 및 테스트용
+
+version: '3.8'
+
+services:
+  # PostgreSQL (관계형 데이터)
+  postgres:
+    image: postgres:14
+    container_name: automation-postgres
+    environment:
+      POSTGRES_DB: automation
+      POSTGRES_USER: automation
+      POSTGRES_PASSWORD: automation123
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/database/migrations:/docker-entrypoint-initdb.d/migrations
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U automation -d automation"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - automation-network
+
+  # MongoDB (문서형 데이터)
+  mongodb:
+    image: mongo:6
+    container_name: automation-mongodb
+    environment:
+      MONGO_INITDB_DATABASE: automation
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - ./infrastructure/database/schemas/mongodb-init.js:/docker-entrypoint-initdb.d/init.js:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.runCommand('ping').ok"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - automation-network
+
+  # Redis (캐시/세션)
+  redis:
+    image: redis:7-alpine
+    container_name: automation-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru --protected-mode no
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - automation-network
+
+  # InfluxDB (메트릭 데이터)
+  influxdb:
+    image: influxdb:2
+    container_name: automation-influxdb
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: automation
+      DOCKER_INFLUXDB_INIT_PASSWORD: automation123
+      DOCKER_INFLUXDB_INIT_ORG: automation-org
+      DOCKER_INFLUXDB_INIT_BUCKET: metrics
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: automation-token-12345
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+      - influxdb_config:/etc/influxdb2
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - automation-network
+
+  # MinIO (S3 호환 스토리지)
+  minio:
+    image: minio/minio
+    container_name: automation-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: automation
+      MINIO_ROOT_PASSWORD: automation123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - automation-network
+
+  # Apache Kafka (이벤트 버스)
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    container_name: automation-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_logs:/var/lib/zookeeper/log
+    networks:
+      - automation-network
+
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    container_name: automation-kafka
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 300000
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - automation-network
+
+volumes:
+  postgres_data:
+    driver: local
+  mongodb_data:
+    driver: local
+  redis_data:
+    driver: local
+  influxdb_data:
+    driver: local
+  influxdb_config:
+    driver: local
+  minio_data:
+    driver: local
+  zookeeper_data:
+    driver: local
+  zookeeper_logs:
+    driver: local
+  kafka_data:
+    driver: local
+
+networks:
+  automation-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

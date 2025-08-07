@@ -1,0 +1,934 @@
+openapi: 3.0.3
+info:
+  title: MCP Integration Service API
+  version: 1.0.0
+  description: MCP 서버 통합 및 도구 실행 API (Model Context Protocol 표준 준수)
+  contact:
+    name: Backend Team - Domains
+    email: backend-domains@automation-system.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8201/api/v1
+    description: Development server
+  - url: http://mcp-service:8201/api/v1
+    description: Internal service communication
+
+paths:
+  /mcp/servers:
+    get:
+      summary: MCP 서버 목록 조회
+      description: 등록된 MCP 서버들의 목록을 조회합니다.
+      operationId: getMCPServers
+      tags:
+        - MCP Servers
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, inactive, error]
+          description: 서버 상태별 필터링
+        - name: transport
+          in: query
+          schema:
+            type: string
+            enum: [stdio, ssh, docker, http]
+          description: Transport 방식별 필터링
+          example: "stdio"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: MCP 서버 목록 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPServerListResponse'
+        '400':
+          description: 잘못된 요청 파라미터
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 인증 필요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    post:
+      summary: MCP 서버 등록
+      description: 새로운 MCP 서버를 시스템에 등록합니다.
+      operationId: registerMCPServer
+      tags:
+        - MCP Servers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MCPServerCreate'
+      responses:
+        '201':
+          description: MCP 서버 등록 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPServer'
+        '400':
+          description: 잘못된 요청 데이터
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 인증 필요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: 중복된 서버명
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /mcp/servers/{id}:
+    get:
+      summary: MCP 서버 상세 조회
+      description: 특정 MCP 서버의 상세 정보를 조회합니다.
+      operationId: getMCPServerById
+      tags:
+        - MCP Servers
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: MCP 서버 고유 ID
+      responses:
+        '200':
+          description: MCP 서버 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPServer'
+        '404':
+          description: 서버를 찾을 수 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    put:
+      summary: MCP 서버 정보 수정
+      description: 기존 MCP 서버의 정보를 수정합니다.
+      operationId: updateMCPServer
+      tags:
+        - MCP Servers
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MCPServerUpdate'
+      responses:
+        '200':
+          description: MCP 서버 수정 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPServer'
+        '400':
+          description: 잘못된 요청 데이터
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: 서버를 찾을 수 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      summary: MCP 서버 삭제
+      description: 시스템에서 MCP 서버를 삭제합니다.
+      operationId: deleteMCPServer
+      tags:
+        - MCP Servers
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: MCP 서버 삭제 성공
+        '404':
+          description: 서버를 찾을 수 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /mcp/servers/{id}/tools:
+    get:
+      summary: MCP 서버 도구 목록 조회
+      description: 특정 MCP 서버가 제공하는 도구들의 목록을 조회합니다.
+      operationId: getMCPServerTools
+      tags:
+        - MCP Tools
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: MCP 서버 고유 ID
+      responses:
+        '200':
+          description: 도구 목록 조회 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  serverId:
+                    type: string
+                    format: uuid
+                  serverName:
+                    type: string
+                  tools:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MCPTool'
+        '404':
+          description: 서버를 찾을 수 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /mcp/servers/{id}/test:
+    post:
+      summary: MCP 서버 연결 테스트
+      description: MCP 서버와의 연결을 테스트합니다.
+      operationId: testMCPConnection
+      tags:
+        - MCP Servers
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 연결 테스트 완료
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPConnectionTest'
+        '404':
+          description: 서버를 찾을 수 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /mcp/execute:
+    post:
+      summary: MCP 도구 실행
+      description: MCP 서버의 도구를 실행합니다 (JSON-RPC 2.0 호출).
+      operationId: executeMCPTool
+      tags:
+        - MCP Execution
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MCPExecutionRequest'
+      responses:
+        '200':
+          description: 동기 실행 완료
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPExecutionResponse'
+        '202':
+          description: 비동기 실행 시작됨
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  executionId:
+                    type: string
+                    format: uuid
+        '400':
+          description: 잘못된 요청 데이터
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: 서버 또는 도구를 찾을 수 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /mcp/executions/{id}:
+    get:
+      summary: 실행 상태 조회
+      description: MCP 도구 실행 상태를 조회합니다.
+      operationId: getMCPExecutionStatus
+      tags:
+        - MCP Execution
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: 실행 ID
+      responses:
+        '200':
+          description: 실행 상태 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPExecutionStatus'
+        '404':
+          description: 실행을 찾을 수 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /mcp/discover:
+    post:
+      summary: 도구 디스커버리
+      description: 모든 MCP 서버 또는 특정 서버의 도구를 재검색합니다.
+      operationId: discoverTools
+      tags:
+        - MCP Tools
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                serverId:
+                  type: string
+                  format: uuid
+                  description: 특정 서버만 검색 (비어있으면 전체)
+      responses:
+        '200':
+          description: 디스커버리 완료
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  serversScanned:
+                    type: integer
+                  toolsDiscovered:
+                    type: integer
+                  errors:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        serverId:
+                          type: string
+                        error:
+                          type: string
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    MCPServer:
+      type: object
+      required:
+        - id
+        - name
+        - transport
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: MCP 서버 고유 ID
+        name:
+          type: string
+          description: MCP 서버명
+          example: "Claude Desktop MCP Server"
+        description:
+          type: string
+          description: 서버 설명
+        transport:
+          type: string
+          enum: [stdio, ssh, docker, http]
+          description: MCP 연결 방식
+          example: "stdio"
+        status:
+          type: string
+          enum: [active, inactive, error]
+          description: 서버 상태
+          example: "active"
+        connectionStatus:
+          type: string
+          enum: [connected, disconnected, connecting, error]
+          description: 연결 상태
+        
+        # Transport별 설정
+        command:
+          type: string
+          description: stdio transport용 실행 명령
+          example: "npx @modelcontextprotocol/server-filesystem"
+        args:
+          type: array
+          items:
+            type: string
+          description: stdio transport용 인자
+        sshConfig:
+          $ref: '#/components/schemas/SSHConfig'
+        dockerConfig:
+          $ref: '#/components/schemas/DockerConfig'
+        httpConfig:
+          $ref: '#/components/schemas/HTTPConfig'
+        
+        # MCP 서버 정보
+        serverInfo:
+          $ref: '#/components/schemas/MCPServerInfo'
+        
+        metadata:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        lastHealthCheck:
+          type: string
+          format: date-time
+        lastError:
+          type: string
+
+    MCPServerCreate:
+      type: object
+      required:
+        - name
+        - transport
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 500
+        transport:
+          type: string
+          enum: [stdio, ssh, docker, http]
+        
+        # Transport별 설정 (하나만 제공)
+        command:
+          type: string
+        args:
+          type: array
+          items:
+            type: string
+        sshConfig:
+          $ref: '#/components/schemas/SSHConfig'
+        dockerConfig:
+          $ref: '#/components/schemas/DockerConfig'
+        httpConfig:
+          $ref: '#/components/schemas/HTTPConfig'
+        
+        metadata:
+          type: object
+          additionalProperties: true
+
+    MCPServerUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 500
+        status:
+          type: string
+          enum: [active, inactive, error]
+        command:
+          type: string
+          description: stdio transport의 실행 명령어
+          maxLength: 500
+        args:
+          type: array
+          description: stdio transport의 명령어 인자
+          items:
+            type: string
+        sshConfig:
+          type: object
+          description: SSH transport 설정
+          additionalProperties: true
+        dockerConfig:
+          type: object
+          description: Docker transport 설정
+          additionalProperties: true
+        httpConfig:
+          type: object
+          description: HTTP transport 설정
+          additionalProperties: true
+        metadata:
+          type: object
+          additionalProperties: true
+        # Transport 타입 자체는 수정 불가 (서버 재생성 필요)
+
+    MCPServerListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - limit
+        - offset
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MCPServer'
+        total:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+        offset:
+          type: integer
+          minimum: 0
+
+    SSHConfig:
+      type: object
+      required:
+        - host
+        - port
+        - username
+        - command
+      properties:
+        host:
+          type: string
+          minLength: 1
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          default: 22
+        username:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          format: password
+          writeOnly: true
+        privateKey:
+          type: string
+          writeOnly: true
+        command:
+          type: string
+          minLength: 1
+
+    DockerConfig:
+      type: object
+      required:
+        - image
+      properties:
+        image:
+          type: string
+          minLength: 1
+        container:
+          type: string
+        command:
+          type: array
+          items:
+            type: string
+
+    HTTPConfig:
+      type: object
+      required:
+        - url
+      properties:
+        url:
+          type: string
+          format: uri
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+
+    MCPServerInfo:
+      type: object
+      properties:
+        name:
+          type: string
+          description: 서버 구현 이름
+        version:
+          type: string
+          description: 서버 버전
+        protocolVersion:
+          type: string
+          description: MCP 프로토콜 버전
+          example: "1.0"
+        capabilities:
+          type: object
+          properties:
+            tools:
+              type: boolean
+              default: false
+            resources:
+              type: boolean
+              default: false
+            prompts:
+              type: boolean
+              default: false
+            logging:
+              type: boolean
+              default: false
+
+    MCPTool:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          description: 도구 이름 (고유)
+          example: "read_file"
+        description:
+          type: string
+          description: 도구 설명
+          example: "Read contents of a file"
+        inputSchema:
+          type: object
+          description: JSON Schema for parameters
+          properties:
+            type:
+              type: string
+              enum: [object]
+            properties:
+              type: object
+              additionalProperties: true
+            required:
+              type: array
+              items:
+                type: string
+
+    MCPResource:
+      type: object
+      required:
+        - uri
+        - name
+      properties:
+        uri:
+          type: string
+          format: uri
+          example: "file:///home/user/document.txt"
+        name:
+          type: string
+          example: "document.txt"
+        description:
+          type: string
+        mimeType:
+          type: string
+          example: "text/plain"
+
+    MCPPrompt:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        arguments:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              description:
+                type: string
+              required:
+                type: boolean
+
+    MCPExecutionRequest:
+      type: object
+      required:
+        - serverId
+        - method
+      properties:
+        serverId:
+          type: string
+          format: uuid
+          description: MCP 서버 ID
+        method:
+          type: string
+          description: 실행할 도구 이름 (JSON-RPC method)
+          example: "read_file"
+        params:
+          type: object
+          additionalProperties: true
+          description: 도구 파라미터 (JSON-RPC params)
+          example:
+            path: "/home/user/document.txt"
+        async:
+          type: boolean
+          default: false
+          description: 비동기 실행 여부
+
+    MCPExecutionResponse:
+      type: object
+      required:
+        - executionId
+        - status
+      properties:
+        executionId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [completed, failed, pending, running]
+        result:
+          description: JSON-RPC result
+        error:
+          type: object
+          description: JSON-RPC error
+          properties:
+            code:
+              type: integer
+            message:
+              type: string
+            data:
+              type: object
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        duration:
+          type: integer
+          description: 실행 시간 (ms)
+
+    MCPExecutionStatus:
+      type: object
+      required:
+        - executionId
+        - status
+        - startedAt
+      properties:
+        executionId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, running, completed, failed]
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        result:
+          description: 실행 결과
+        error:
+          type: object
+          properties:
+            code:
+              type: integer
+            message:
+              type: string
+            data:
+              type: object
+        logs:
+          type: array
+          items:
+            type: string
+        metadata:
+          type: object
+          additionalProperties: true
+
+    MCPConnectionTest:
+      type: object
+      required:
+        - serverId
+        - success
+        - testedAt
+      properties:
+        serverId:
+          type: string
+          format: uuid
+        success:
+          type: boolean
+        responseTime:
+          type: integer
+          description: 응답 시간 (ms)
+        error:
+          type: string
+        capabilities:
+          type: object
+          properties:
+            tools:
+              type: boolean
+            resources:
+              type: boolean
+            prompts:
+              type: boolean
+            logging:
+              type: boolean
+        testedAt:
+          type: string
+          format: date-time
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+        - timestamp
+      properties:
+        error:
+          type: string
+          description: 오류 코드
+          example: "MCP_SERVER_NOT_FOUND"
+        message:
+          type: string
+          description: 오류 메시지
+          example: "MCP server with ID '550e8400-e29b-41d4-a716-446655440000' not found"
+        timestamp:
+          type: string
+          format: date-time
+          description: 오류 발생 시간
+        details:
+          type: object
+          additionalProperties: true
+          description: 추가 오류 상세 정보
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: MCP Servers
+    description: MCP 서버 관리 API
+  - name: MCP Tools
+    description: MCP 도구 관리 API
+  - name: MCP Execution
+    description: MCP 도구 실행 API

@@ -1,0 +1,635 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WebSocketMessage",
+  "description": "WebSocket 메시지 형식 (섹션 3.1 기반)",
+  "type": "object",
+  "required": ["type", "timestamp"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": [
+        "execution_update",
+        "metric_update", 
+        "device_status",
+        "workflow_progress",
+        "chat_response",
+        "alert",
+        "error",
+        "heartbeat",
+        "connection_status"
+      ],
+      "description": "메시지 타입",
+      "examples": ["execution_update"]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "메시지 생성 시간",
+      "examples": ["2024-01-15T10:30:00Z"]
+    },
+    "payload": {
+      "type": "object",
+      "description": "메시지별 페이로드",
+      "oneOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "execution_update"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "executionId": {
+                "type": "string",
+                "format": "uuid",
+                "description": "실행 ID"
+              },
+              "workflowId": {
+                "type": "string",
+                "description": "워크플로우 ID"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["pending", "running", "completed", "failed", "cancelled"],
+                "description": "실행 상태"
+              },
+              "progress": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100,
+                "description": "진행률 (%)"
+              },
+              "currentStep": {
+                "type": "object",
+                "properties": {
+                  "stepId": {
+                    "type": "string",
+                    "description": "현재 단계 ID"
+                  },
+                  "stepName": {
+                    "type": "string",
+                    "description": "현재 단계명"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["pending", "running", "completed", "failed"],
+                    "description": "단계 상태"
+                  }
+                }
+              },
+              "result": {
+                "type": "object",
+                "additionalProperties": true,
+                "description": "실행 결과 (완료 시)"
+              },
+              "error": {
+                "type": "string",
+                "description": "오류 메시지 (실패 시)"
+              },
+              "estimatedTimeRemaining": {
+                "type": "integer",
+                "description": "예상 남은 시간 (초)"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "metric_update"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "deviceId": {
+                "type": "string",
+                "format": "uuid",
+                "description": "장비 ID"
+              },
+              "deviceName": {
+                "type": "string",
+                "description": "장비명"
+              },
+              "metrics": {
+                "type": "object",
+                "properties": {
+                  "cpu": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": "CPU 사용률 (%)"
+                  },
+                  "memory": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": "메모리 사용률 (%)"
+                  },
+                  "disk": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": "디스크 사용률 (%)"
+                  },
+                  "network": {
+                    "type": "object",
+                    "properties": {
+                      "rxBytes": {
+                        "type": "integer",
+                        "description": "수신 바이트"
+                      },
+                      "txBytes": {
+                        "type": "integer",
+                        "description": "송신 바이트"
+                      }
+                    }
+                  },
+                  "temperature": {
+                    "type": "number",
+                    "description": "온도 (℃)"
+                  }
+                }
+              },
+              "thresholds": {
+                "type": "object",
+                "properties": {
+                  "cpu": {
+                    "type": "number",
+                    "description": "CPU 임계값"
+                  },
+                  "memory": {
+                    "type": "number", 
+                    "description": "메모리 임계값"
+                  },
+                  "disk": {
+                    "type": "number",
+                    "description": "디스크 임계값"
+                  }
+                }
+              },
+              "alerts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "metric": {
+                      "type": "string",
+                      "description": "알림 메트릭"
+                    },
+                    "severity": {
+                      "type": "string",
+                      "enum": ["low", "medium", "high", "critical"],
+                      "description": "심각도"
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "알림 메시지"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "device_status"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "deviceId": {
+                "type": "string",
+                "format": "uuid",
+                "description": "장비 ID"
+              },
+              "deviceName": {
+                "type": "string",
+                "description": "장비명"
+              },
+              "previousStatus": {
+                "type": "string",
+                "enum": ["online", "offline", "error", "maintenance"],
+                "description": "이전 상태"
+              },
+              "currentStatus": {
+                "type": "string",
+                "enum": ["online", "offline", "error", "maintenance"],
+                "description": "현재 상태"
+              },
+              "reason": {
+                "type": "string",
+                "description": "상태 변경 이유"
+              },
+              "lastHeartbeat": {
+                "type": "string",
+                "format": "date-time",
+                "description": "마지막 하트비트"
+              },
+              "uptime": {
+                "type": "integer",
+                "description": "가동 시간 (초)"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "workflow_progress"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "executionId": {
+                "type": "string",
+                "format": "uuid",
+                "description": "실행 ID"
+              },
+              "workflowId": {
+                "type": "string",
+                "description": "워크플로우 ID"
+              },
+              "workflowName": {
+                "type": "string",
+                "description": "워크플로우명"
+              },
+              "stepUpdate": {
+                "type": "object",
+                "properties": {
+                  "stepId": {
+                    "type": "string",
+                    "description": "단계 ID"
+                  },
+                  "stepName": {
+                    "type": "string",
+                    "description": "단계명"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["started", "completed", "failed"],
+                    "description": "단계 상태 변경"
+                  },
+                  "progress": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": "단계 진행률"
+                  },
+                  "result": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "단계 결과"
+                  },
+                  "output": {
+                    "type": "string",
+                    "description": "단계 출력"
+                  },
+                  "error": {
+                    "type": "string",
+                    "description": "오류 메시지 (실패 시)"
+                  }
+                }
+              },
+              "overallProgress": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100,
+                "description": "전체 진행률"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "chat_response"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "sessionId": {
+                "type": "string",
+                "format": "uuid",
+                "description": "대화 세션 ID"
+              },
+              "messageId": {
+                "type": "string",
+                "format": "uuid",
+                "description": "메시지 ID"
+              },
+              "content": {
+                "type": "string",
+                "description": "응답 내용"
+              },
+              "streaming": {
+                "type": "boolean",
+                "description": "스트리밍 여부"
+              },
+              "chunk": {
+                "type": "string",
+                "description": "스트리밍 청크 (스트리밍 시)"
+              },
+              "finished": {
+                "type": "boolean",
+                "description": "응답 완료 여부"
+              },
+              "metadata": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "string",
+                    "description": "사용된 모델"
+                  },
+                  "tokenUsage": {
+                    "type": "object",
+                    "properties": {
+                      "totalTokens": {
+                        "type": "integer"
+                      },
+                      "cost": {
+                        "type": "number"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "alert"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "alertId": {
+                "type": "string",
+                "format": "uuid",
+                "description": "알림 ID"
+              },
+              "severity": {
+                "type": "string",
+                "enum": ["low", "medium", "high", "critical"],
+                "description": "심각도"
+              },
+              "category": {
+                "type": "string",
+                "enum": ["system", "security", "performance", "availability"],
+                "description": "알림 카테고리"
+              },
+              "title": {
+                "type": "string",
+                "description": "알림 제목"
+              },
+              "message": {
+                "type": "string",
+                "description": "알림 메시지"
+              },
+              "source": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": ["device", "workflow", "system"],
+                    "description": "알림 소스 타입"
+                  },
+                  "id": {
+                    "type": "string",
+                    "description": "소스 ID"
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "소스명"
+                  }
+                }
+              },
+              "actions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "액션 ID"
+                    },
+                    "label": {
+                      "type": "string",
+                      "description": "액션 라벨"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["acknowledge", "resolve", "escalate", "execute"],
+                      "description": "액션 타입"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "error"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "errorId": {
+                "type": "string",
+                "format": "uuid",
+                "description": "오류 ID"
+              },
+              "errorCode": {
+                "type": "string",
+                "description": "오류 코드"
+              },
+              "message": {
+                "type": "string",
+                "description": "오류 메시지"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": true,
+                "description": "오류 상세 정보"
+              },
+              "context": {
+                "type": "object",
+                "properties": {
+                  "executionId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "관련 실행 ID"
+                  },
+                  "stepId": {
+                    "type": "string",
+                    "description": "관련 단계 ID"
+                  },
+                  "deviceId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "관련 장비 ID"
+                  }
+                }
+              },
+              "recoverable": {
+                "type": "boolean",
+                "description": "복구 가능 여부"
+              },
+              "retryable": {
+                "type": "boolean",
+                "description": "재시도 가능 여부"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "heartbeat"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "serverTime": {
+                "type": "string",
+                "format": "date-time",
+                "description": "서버 시간"
+              },
+              "connectionId": {
+                "type": "string",
+                "description": "연결 ID"
+              },
+              "activeConnections": {
+                "type": "integer",
+                "description": "활성 연결 수"
+              },
+              "systemStatus": {
+                "type": "string",
+                "enum": ["healthy", "degraded", "maintenance"],
+                "description": "시스템 상태"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "messageId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "메시지 고유 ID"
+        },
+        "correlationId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "관련 작업 추적 ID"
+        },
+        "userId": {
+          "type": "string",
+          "description": "수신 대상 사용자 ID"
+        },
+        "sessionId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "WebSocket 세션 ID"
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["low", "normal", "high", "urgent"],
+          "description": "메시지 우선순위"
+        },
+        "ttl": {
+          "type": "integer",
+          "description": "메시지 유효 시간 (초)"
+        },
+        "version": {
+          "type": "string",
+          "description": "메시지 스키마 버전",
+          "examples": ["1.0.0"]
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "type": "execution_update",
+      "timestamp": "2024-01-15T10:30:30Z",
+      "payload": {
+        "executionId": "660e8400-e29b-41d4-a716-446655440001",
+        "workflowId": "cpu-monitor-restart-v1",
+        "status": "running",
+        "progress": 60,
+        "currentStep": {
+          "stepId": "collect-metrics",
+          "stepName": "메트릭 수집",
+          "status": "running"
+        },
+        "estimatedTimeRemaining": 45
+      },
+      "metadata": {
+        "messageId": "770e8400-e29b-41d4-a716-446655440002",
+        "correlationId": "880e8400-e29b-41d4-a716-446655440003",
+        "userId": "admin",
+        "sessionId": "990e8400-e29b-41d4-a716-446655440004",
+        "priority": "normal",
+        "version": "1.0.0"
+      }
+    },
+    {
+      "type": "alert",
+      "timestamp": "2024-01-15T10:35:00Z",
+      "payload": {
+        "alertId": "aa0e8400-e29b-41d4-a716-446655440005",
+        "severity": "high",
+        "category": "performance",
+        "title": "CPU 사용률 임계값 초과",
+        "message": "web-server-02의 CPU 사용률이 95%로 임계값(90%)을 초과했습니다.",
+        "source": {
+          "type": "device",
+          "id": "bb0e8400-e29b-41d4-a716-446655440006",
+          "name": "web-server-02"
+        },
+        "actions": [
+          {
+            "id": "acknowledge",
+            "label": "확인",
+            "type": "acknowledge"
+          },
+          {
+            "id": "restart",
+            "label": "재시작",
+            "type": "execute"
+          }
+        ]
+      },
+      "metadata": {
+        "messageId": "cc0e8400-e29b-41d4-a716-446655440007",
+        "priority": "high",
+        "version": "1.0.0"
+      }
+    }
+  ]
+}

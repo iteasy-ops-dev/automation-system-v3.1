@@ -1,0 +1,311 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                    String                @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  username              String                @unique @db.Citext
+  email                 String                @unique @db.Citext
+  passwordHash          String                @map("password_hash") @db.VarChar(255)
+  fullName              String?               @map("full_name") @db.VarChar(100)
+  role                  String                @default("user") @db.VarChar(50)
+  status                String                @default("active") @db.VarChar(20)
+  lastLoginAt           DateTime?             @map("last_login_at") @db.Timestamp(6)
+  passwordChangedAt     DateTime?             @default(now()) @map("password_changed_at") @db.Timestamp(6)
+  createdAt             DateTime?             @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt             DateTime?             @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+  auditLogs             AuditLog[]
+  statusChanges         DeviceStatusHistory[]
+  llmRequests           LlmRequest[]
+  mcpExecutions         McpExecution[]
+  systemSettingsUpdates SystemSetting[]
+  sessions              UserSession[]
+  workflowExecutions    WorkflowExecution[]
+  workflowsCreated      Workflow[]
+
+  @@index([email], map: "idx_users_email")
+  @@index([username], map: "idx_users_username")
+  @@map("users")
+}
+
+model UserSession {
+  id           String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  refreshToken String    @map("refresh_token") @db.VarChar(500)
+  expiresAt    DateTime  @map("expires_at") @db.Timestamp(6)
+  ipAddress    String?   @map("ip_address") @db.Inet
+  userAgent    String?   @map("user_agent")
+  createdAt    DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("user_sessions")
+}
+
+model DeviceGroup {
+  id          String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name        String        @db.VarChar(100)
+  description String?       @db.VarChar(500)
+  parentId    String?       @map("parent_id") @db.Uuid
+  metadata    Json?         @default("{}")
+  createdAt   DateTime?     @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt   DateTime?     @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+  parent      DeviceGroup?  @relation("DeviceGroupHierarchy", fields: [parentId], references: [id], onUpdate: NoAction)
+  children    DeviceGroup[] @relation("DeviceGroupHierarchy")
+  devices     Device[]
+
+  @@unique([name, parentId], name: "unique_group_name_per_parent", map: "unique_group_name_per_parent")
+  @@map("device_groups")
+}
+
+model Device {
+  id             String                @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name           String                @unique(map: "unique_device_name") @db.VarChar(100)
+  type           String                @db.VarChar(20)
+  // IMPORTANT: DB CHECK constraint allows: 'online', 'offline', 'error', 'maintenance', 'active', 'inactive'
+  // Frontend uses: 'online', 'offline', 'error', 'maintenance'
+  // Backend uses: 'active', 'inactive', 'maintenance'
+  status         String                @default("active") @db.VarChar(20)
+  groupId        String?               @map("group_id") @db.Uuid
+  connectionInfo Json?                 @map("connection_info")  // 연결 정보 복원 (암호화 저장)
+  metadata       Json?                 @default("{}")
+  tags           String[]              @default([])
+  createdAt      DateTime?             @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt      DateTime?             @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+  statusHistory  DeviceStatusHistory[]
+  group          DeviceGroup?          @relation(fields: [groupId], references: [id], onUpdate: NoAction)
+
+  @@index([groupId], map: "idx_devices_group_id")
+  @@index([name], map: "idx_devices_name")
+  @@index([status], map: "idx_devices_status")
+  @@index([type], map: "idx_devices_type")
+  @@map("devices")
+}
+
+model DeviceStatusHistory {
+  id             String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  deviceId       String    @map("device_id") @db.Uuid
+  previousStatus String?   @map("previous_status") @db.VarChar(20)
+  currentStatus  String    @map("current_status") @db.VarChar(20)
+  reason         String?
+  changedBy      String?   @map("changed_by") @db.Uuid
+  changedAt      DateTime? @default(now()) @map("changed_at") @db.Timestamp(6)
+  user           User?     @relation(fields: [changedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  device         Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("device_status_history")
+}
+
+model McpServer {
+  id               String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name             String         @unique @db.VarChar(100)
+  description      String?
+  transport        String         @db.VarChar(20)  // stdio, ssh, docker, http
+  status           String         @default("inactive") @db.VarChar(20)
+  connectionStatus String         @default("disconnected") @map("connection_status") @db.VarChar(20)
+  
+  // Transport별 설정
+  command          String?        @db.VarChar(500)  // stdio transport
+  args             String[]       @default([])      // stdio transport args
+  sshConfig        Json?          @map("ssh_config")    // SSH transport 설정
+  dockerConfig     Json?          @map("docker_config") // Docker transport 설정  
+  httpConfig       Json?          @map("http_config")   // HTTP transport 설정
+  
+  // MCP 서버 정보
+  serverInfo       Json?          @map("server_info")   // name, version, capabilities
+  
+  // 기존 필드들 (호환성 유지)
+  serverType       String?        @map("server_type") @db.VarChar(50)
+  endpointUrl      String?        @map("endpoint_url") @db.VarChar(500)
+  connectionConfig Json?          @default("{}") @map("connection_config")
+  version          String?        @db.VarChar(20)
+  capabilities     Json?          @default("[]")
+  lastHeartbeat    DateTime?      @map("last_heartbeat") @db.Timestamp(6)
+  lastError        String?        @map("last_error")
+  
+  metadata         Json?          @default("{}")
+  createdAt        DateTime?      @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt        DateTime?      @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+  executions       McpExecution[]
+  tools            McpTool[]
+
+  @@index([transport], map: "idx_mcp_servers_transport")
+  @@index([status], map: "idx_mcp_servers_status")
+  @@map("mcp_servers")
+}
+
+model McpTool {
+  id           String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  serverId     String    @map("server_id") @db.Uuid
+  name         String    @db.VarChar(100)
+  description  String?
+  version      String?   @db.VarChar(20)
+  schema       Json?
+  capabilities Json?     @default("[]")
+  isEnabled    Boolean?  @default(true) @map("is_enabled")
+  createdAt    DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt    DateTime? @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+  server       McpServer @relation(fields: [serverId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([serverId, name], name: "unique_tool_per_server", map: "unique_tool_per_server")
+  @@index([name], map: "idx_mcp_tools_name")
+  @@index([serverId], map: "idx_mcp_tools_server_id")
+  @@map("mcp_tools")
+}
+
+model McpExecution {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  serverId        String    @map("server_id") @db.Uuid
+  toolName        String    @map("tool_name") @db.VarChar(100)
+  executionParams Json?     @map("execution_params")
+  status          String    @db.VarChar(20)
+  result          Json?
+  errorMessage    String?   @map("error_message")
+  startedAt       DateTime? @default(now()) @map("started_at") @db.Timestamp(6)
+  completedAt     DateTime? @map("completed_at") @db.Timestamp(6)
+  durationMs      Int?      @map("duration_ms")
+  executedBy      String?   @map("executed_by") @db.Uuid
+  user            User?     @relation(fields: [executedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  server          McpServer @relation(fields: [serverId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([serverId], map: "idx_mcp_executions_server_id")
+  @@index([startedAt], map: "idx_mcp_executions_started_at")
+  @@index([status], map: "idx_mcp_executions_status")
+  @@map("mcp_executions")
+}
+
+model Workflow {
+  id          String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name        String              @db.VarChar(100)
+  description String?
+  definition  Json
+  version     Int                 @default(1)
+  status      String              @default("active") @db.VarChar(20)
+  tags        String[]            @default([])
+  createdBy   String?             @map("created_by") @db.Uuid
+  createdAt   DateTime?           @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt   DateTime?           @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+  executions  WorkflowExecution[]
+  creator     User?               @relation(fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([name, version], name: "unique_workflow_name_version", map: "unique_workflow_name_version")
+  @@index([createdBy], map: "idx_workflows_created_by")
+  @@index([status], map: "idx_workflows_status")
+  @@map("workflows")
+}
+
+model WorkflowExecution {
+  id           String                  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  workflowId   String                  @map("workflow_id") @db.Uuid
+  sessionId    String?                 @map("session_id") @db.Uuid
+  status       String                  @default("pending") @db.VarChar(20)
+  inputData    Json?                   @map("input_data")
+  outputData   Json?                   @map("output_data")
+  errorDetails Json?                   @map("error_details")
+  startedAt    DateTime?               @default(now()) @map("started_at") @db.Timestamp(6)
+  completedAt  DateTime?               @map("completed_at") @db.Timestamp(6)
+  durationMs   Int?                    @map("duration_ms")
+  executedBy   String?                 @map("executed_by") @db.Uuid
+  steps        WorkflowExecutionStep[]
+  user         User?                   @relation(fields: [executedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  workflow     Workflow                @relation(fields: [workflowId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([startedAt], map: "idx_workflow_executions_started_at")
+  @@index([status], map: "idx_workflow_executions_status")
+  @@index([workflowId], map: "idx_workflow_executions_workflow_id")
+  @@map("workflow_executions")
+}
+
+model WorkflowExecutionStep {
+  id           String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  executionId  String            @map("execution_id") @db.Uuid
+  stepId       String            @map("step_id") @db.VarChar(100)
+  stepName     String            @map("step_name") @db.VarChar(200)
+  stepType     String            @map("step_type") @db.VarChar(50)
+  status       String            @db.VarChar(20)
+  inputData    Json?             @map("input_data")
+  outputData   Json?             @map("output_data")
+  errorDetails Json?             @map("error_details")
+  startedAt    DateTime?         @map("started_at") @db.Timestamp(6)
+  completedAt  DateTime?         @map("completed_at") @db.Timestamp(6)
+  durationMs   Int?              @map("duration_ms")
+  retryCount   Int?              @default(0) @map("retry_count")
+  execution    WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([executionId], map: "idx_workflow_execution_steps_execution_id")
+  @@map("workflow_execution_steps")
+}
+
+model LlmProvider {
+  id           String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name         String       @unique @db.VarChar(50)
+  providerType String       @map("provider_type") @db.VarChar(50)
+  apiEndpoint  String?      @map("api_endpoint") @db.VarChar(500)
+  apiKeyHash   String?      @map("api_key_hash") @db.VarChar(255)
+  models       Json?        @default("[]")
+  rateLimits   Json?        @default("{}") @map("rate_limits")
+  status       String       @default("active") @db.VarChar(20)
+  createdAt    DateTime?    @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt    DateTime?    @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+  requests     LlmRequest[]
+
+  @@index([status], map: "idx_llm_providers_status")
+  @@map("llm_providers")
+}
+
+model LlmRequest {
+  id               String      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  providerId       String      @map("provider_id") @db.Uuid
+  modelName        String      @map("model_name") @db.VarChar(100)
+  requestType      String      @map("request_type") @db.VarChar(50)
+  promptTokens     Int?        @map("prompt_tokens")
+  completionTokens Int?        @map("completion_tokens")
+  totalTokens      Int?        @map("total_tokens")
+  costEstimate     Decimal?    @map("cost_estimate") @db.Decimal(10, 6)
+  responseTimeMs   Int?        @map("response_time_ms")
+  status           String      @db.VarChar(20)
+  errorMessage     String?     @map("error_message")
+  requestedBy      String?     @map("requested_by") @db.Uuid
+  createdAt        DateTime?   @default(now()) @map("created_at") @db.Timestamp(6)
+  provider         LlmProvider @relation(fields: [providerId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user             User?       @relation(fields: [requestedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([createdAt], map: "idx_llm_requests_created_at")
+  @@index([providerId], map: "idx_llm_requests_provider_id")
+  @@map("llm_requests")
+}
+
+model SystemSetting {
+  key         String    @id @db.VarChar(100)
+  value       Json
+  description String?
+  category    String?   @db.VarChar(50)
+  isEncrypted Boolean?  @default(false) @map("is_encrypted")
+  updatedBy   String?   @map("updated_by") @db.Uuid
+  updatedAt   DateTime? @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+  user        User?     @relation(fields: [updatedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("system_settings")
+}
+
+model AuditLog {
+  id           String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  action       String    @db.VarChar(100)
+  resourceType String    @map("resource_type") @db.VarChar(50)
+  resourceId   String?   @map("resource_id") @db.Uuid
+  userId       String?   @map("user_id") @db.Uuid
+  ipAddress    String?   @map("ip_address") @db.Inet
+  userAgent    String?   @map("user_agent")
+  details      Json?
+  createdAt    DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+  user         User?     @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([createdAt], map: "idx_audit_logs_created_at")
+  @@index([resourceType], map: "idx_audit_logs_resource_type")
+  @@index([userId], map: "idx_audit_logs_user_id")
+  @@map("audit_logs")
+}

@@ -1,0 +1,162 @@
+#!/bin/bash
+# create-full-backup.sh
+
+set -e
+PROJECT_DIR="/Users/leesg/Documents/work_ops/automation-system"
+BACKUP_ID="$(date +%Y%m%d_%H%M%S)"
+BACKUP_DIR="$PROJECT_DIR/backups/$BACKUP_ID"
+
+echo "🚀 통합 백업 시작: $BACKUP_ID"
+mkdir -p $BACKUP_DIR/{images,data,schemas}
+
+# 1. 서비스 상태 저장
+echo "📊 서비스 상태 저장..."
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Image}}" | grep automation > $BACKUP_DIR/service-status.txt
+
+# 2. Docker 이미지 백업
+echo "📦 Docker 이미지 백업..."
+cd $BACKUP_DIR/images
+for service in gateway storage device-service mcp-service llm-service workflow-engine main-app; do
+    echo "  - $service 백업 중..."
+    docker save automation-system/$service:latest -o ${service}-$BACKUP_ID.tar &
+done
+wait
+
+# 3. 데이터베이스 백업 (스키마 포함)
+echo "🗄️ 데이터베이스 백업..."
+cd $BACKUP_DIR/data
+
+# PostgreSQL - 스키마와 데이터 분리 백업
+echo "  - PostgreSQL 스키마 백업..."
+docker exec automation-postgres pg_dump -U postgres -d automation --schema-only > postgres-schema-$BACKUP_ID.sql
+
+echo "  - PostgreSQL 데이터 백업..."
+docker exec automation-postgres pg_dump -U postgres -d automation --data-only > postgres-data-$BACKUP_ID.sql
+
+# Prisma 마이그레이션 상태 백업
+echo "  - Prisma 마이그레이션 상태 백업..."
+docker exec automation-postgres pg_dump -U postgres -d automation -t _prisma_migrations > prisma-migrations-$BACKUP_ID.sql
+
+# MongoDB 백업
+echo "  - MongoDB 백업..."
+docker exec automation-mongodb mongodump --archive --db=automation \
+  --username=admin --password=automation_mongo_pass_2024 \
+  --authenticationDatabase=admin > mongodb-$BACKUP_ID.archive
+
+# Redis 백업
+echo "  - Redis 백업..."
+docker exec automation-redis redis-cli -a automation_redis_pass_2024 --rdb /tmp/redis-backup.rdb
+docker cp automation-redis:/tmp/redis-backup.rdb ./redis-$BACKUP_ID.rdb
+
+# 4. Prisma 스키마 백업
+echo "📋 Prisma 스키마 백업..."
+cd $BACKUP_DIR/schemas
+for service in storage mcp-integration workflow-engine; do
+    service_path=""
+    case $service in
+        "storage")
+            service_path="$PROJECT_DIR/services/storage"
+            ;;
+        "mcp-integration")
+            service_path="$PROJECT_DIR/services/domain/mcp"
+            ;;
+        "workflow-engine")
+            service_path="$PROJECT_DIR/services/domain/workflow"
+            ;;
+    esac
+    
+    if [ -d "$service_path/prisma" ]; then
+        cp -r "$service_path/prisma" "./${service}-prisma"
+    fi
+done
+
+# 5. 환경 설정 백업
+echo "⚙️  환경 설정 백업..."
+cd $BACKUP_DIR
+cp $PROJECT_DIR/.env .env.backup 2>/dev/null || true
+cp $PROJECT_DIR/docker-compose.yml docker-compose.yml.backup
+
+# 6. 백업 정보
+cat > $BACKUP_DIR/backup-info.txt << EOF
+백업 ID: $BACKUP_ID
+백업 시간: $(date)
+백업 크기: $(du -sh $BACKUP_DIR | cut -f1)
+시스템 버전: v3.1
+Docker 버전: $(docker --version)
+특이사항: 스키마와 데이터 분리 백업, Prisma 마이그레이션 포함
+EOF
+
+# 7. 복원 스크립트 생성
+cat > $BACKUP_DIR/restore-full-backup.sh << 'RESTORE_EOF'
+#!/bin/bash
+# 완전 복원 스크립트
+
+set -e
+BACKUP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$(dirname "$BACKUP_DIR")")"
+
+echo "🔄 완전 백업 복원 시작: $(basename $BACKUP_DIR)"
+
+# 1. 시스템 중지
+echo "🛑 기존 시스템 중지..."
+cd "$PROJECT_DIR"
+docker-compose down
+
+# 2. 이미지 복원
+echo "📦 Docker 이미지 복원..."
+cd "$BACKUP_DIR/images"
+for tar_file in *.tar; do
+    echo "  - $tar_file 복원 중..."
+    docker load -i "$tar_file"
+done
+
+# 3. 데이터베이스 서비스만 시작
+echo "🗄️ 데이터베이스 서비스 시작..."
+cd "$PROJECT_DIR"
+docker-compose up -d postgres mongodb redis
+
+# PostgreSQL 준비 대기
+until docker exec automation-postgres pg_isready -U postgres > /dev/null 2>&1; do
+    echo "   PostgreSQL 준비 대기..."
+    sleep 2
+done
+
+# 4. PostgreSQL 복원 (스키마 → 마이그레이션 → 데이터)
+echo "📊 PostgreSQL 복원..."
+docker exec automation-postgres psql -U postgres -c "DROP DATABASE IF EXISTS automation;"
+docker exec automation-postgres psql -U postgres -c "CREATE DATABASE automation;"
+
+echo "  - 스키마 복원..."
+docker exec -i automation-postgres psql -U postgres -d automation < "$BACKUP_DIR/data/postgres-schema-"*.sql
+
+echo "  - Prisma 마이그레이션 상태 복원..."
+docker exec -i automation-postgres psql -U postgres -d automation < "$BACKUP_DIR/data/prisma-migrations-"*.sql
+
+echo "  - 데이터 복원..."
+docker exec -i automation-postgres psql -U postgres -d automation < "$BACKUP_DIR/data/postgres-data-"*.sql
+
+# 5. MongoDB 복원
+echo "📊 MongoDB 복원..."
+docker exec -i automation-mongodb mongorestore --archive --db=automation \
+  --username=admin --password=automation_mongo_pass_2024 \
+  --authenticationDatabase=admin --drop < "$BACKUP_DIR/data/mongodb-"*.archive
+
+# 6. 전체 시스템 시작
+echo "🚀 전체 시스템 시작..."
+docker-compose up -d
+
+# 7. 헬스체크
+echo "⏳ 시스템 안정화 대기..."
+sleep 30
+
+echo "✅ 복원 완료!"
+echo "📍 접속: http://localhost:3001"
+echo "🔍 시스템 상태 확인 권장"
+RESTORE_EOF
+
+chmod +x $BACKUP_DIR/restore-full-backup.sh
+
+echo "✅ 백업 완료!"
+echo "📍 백업 위치: $BACKUP_DIR"
+echo "📊 백업 크기: $(du -sh $BACKUP_DIR | cut -f1)"
+echo "🔄 복원: cd $BACKUP_DIR && ./restore-full-backup.sh"

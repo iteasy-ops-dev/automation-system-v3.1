@@ -1,0 +1,36 @@
+version: '3.8'
+
+# 개발용 docker-compose 오버라이드
+# 사용법: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  main-app:
+    build:
+      context: ./frontend/main-app
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./frontend/main-app/src:/app/src:ro
+      - ./frontend/main-app/public:/app/public:ro
+      - ./frontend/main-app/package.json:/app/package.json:ro
+      - ./frontend/main-app/package-lock.json:/app/package-lock.json:ro
+      - ./frontend/main-app/vite.config.ts:/app/vite.config.ts:ro
+      - ./frontend/main-app/tsconfig.json:/app/tsconfig.json:ro
+      - ./frontend/main-app/tailwind.config.js:/app/tailwind.config.js:ro
+      - ./frontend/main-app/postcss.config.js:/app/postcss.config.js:ro
+    environment:
+      - NODE_ENV=development
+      - VITE_API_BASE_URL=http://localhost:8080
+      - VITE_WS_HOST=localhost:8080
+    ports:
+      - "3001:5173"  # Vite dev server 기본 포트
+    command: npm run dev -- --host 0.0.0.0
+    depends_on:
+      - gateway
+    networks:
+      - frontend-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5173"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

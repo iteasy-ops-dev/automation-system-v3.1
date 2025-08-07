@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>채팅 워크플로우 테스트</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            max-width: 800px; 
+            margin: 0 auto; 
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background: #007bff;
+            color: white;
+        }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #6c757d; cursor: not-allowed; }
+        .response {
+            background: #f8f9fa;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        input[type="text"] {
+            width: 70%;
+            padding: 8px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 채팅 워크플로우 테스트</h1>
+        
+        <div class="test-section">
+            <h3>1. 인증 상태</h3>
+            <div id="auth-status" class="status info">확인 중...</div>
+            <button onclick="checkAuth()">인증 확인</button>
+            <button onclick="login()">로그인</button>
+        </div>
+
+        <div class="test-section">
+            <h3>2. 채팅 메시지 테스트</h3>
+            <input type="text" id="messageInput" placeholder="메시지를 입력하세요..." value="안녕하세요">
+            <button onclick="sendChatMessage()" id="sendBtn">메시지 전송</button>
+            <div id="chat-response" class="response">응답이 여기에 표시됩니다...</div>
+        </div>
+
+        <div class="test-section">
+            <h3>3. 빠른 테스트</h3>
+            <button onclick="testMessage('안녕하세요')">인사말 테스트</button>
+            <button onclick="testMessage('5 + 3')">계산 테스트</button>
+            <button onclick="testMessage('서버 상태 확인해줘')">인프라 테스트</button>
+            <button onclick="testMessage('도움말')">도움말 테스트</button>
+        </div>
+
+        <div class="test-section">
+            <h3>4. WebSocket 상태</h3>
+            <div id="ws-status" class="status info">WebSocket 연결 확인 중...</div>
+            <button onclick="connectWebSocket()">WebSocket 연결</button>
+            <button onclick="disconnectWebSocket()">WebSocket 해제</button>
+        </div>
+
+        <div class="test-section">
+            <h3>5. 로그</h3>
+            <div id="logs" class="response">로그가 여기에 표시됩니다...</div>
+            <button onclick="clearLogs()">로그 지우기</button>
+        </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
+    <script>
+        let authToken = null;
+        let socket = null;
+        const API_BASE = 'http://localhost:8080/api/v1';
+        const WS_BASE = 'http://localhost:8080';
+        const sessionId = generateUUID();
+
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logEl = document.getElementById('logs');
+            const prefix = type === 'error' ? '❌' : type === 'success' ? '✅' : 'ℹ️';
+            logEl.textContent += `${timestamp} ${prefix} ${message}\n`;
+            logEl.scrollTop = logEl.scrollHeight;
+            console.log(`[${type.toUpperCase()}]`, message);
+        }
+
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                const r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        async function checkAuth() {
+            try {
+                const response = await fetch(`${API_BASE}/auth/me`, {
+                    headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
+                });
+                
+                if (response.ok) {
+                    const user = await response.json();
+                    document.getElementById('auth-status').className = 'status success';
+                    document.getElementById('auth-status').textContent = `✅ 인증됨: ${user.username}`;
+                    log('인증 상태 확인 완료', 'success');
+                } else {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+            } catch (error) {
+                document.getElementById('auth-status').className = 'status error';
+                document.getElementById('auth-status').textContent = `❌ 인증 실패: ${error.message}`;
+                log(`인증 확인 실패: ${error.message}`, 'error');
+            }
+        }
+
+        async function login() {
+            try {
+                const response = await fetch(`${API_BASE}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: 'admin',
+                        password: 'Admin123!@#'
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Login failed: ${response.status}`);
+                }
+
+                const data = await response.json();
+                authToken = data.accessToken;
+                
+                document.getElementById('auth-status').className = 'status success';
+                document.getElementById('auth-status').textContent = '✅ 로그인 성공';
+                log('로그인 성공', 'success');
+                
+                // 로그인 후 WebSocket 자동 연결
+                connectWebSocket();
+                
+            } catch (error) {
+                document.getElementById('auth-status').className = 'status error';
+                document.getElementById('auth-status').textContent = `❌ 로그인 실패: ${error.message}`;
+                log(`로그인 실패: ${error.message}`, 'error');
+            }
+        }
+
+        async function sendChatMessage() {
+            const message = document.getElementById('messageInput').value.trim();
+            if (!message) {
+                alert('메시지를 입력하세요');
+                return;
+            }
+
+            await testMessage(message);
+        }
+
+        async function testMessage(message) {
+            if (!authToken) {
+                alert('먼저 로그인해주세요');
+                return;
+            }
+
+            const sendBtn = document.getElementById('sendBtn');
+            const responseEl = document.getElementById('chat-response');
+            
+            try {
+                sendBtn.disabled = true;
+                sendBtn.textContent = '전송 중...';
+                responseEl.textContent = '처리 중...';
+                
+                log(`메시지 전송: "${message}"`);
+
+                const response = await fetch(`${API_BASE}/workflows/chat`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        sessionId: sessionId,
+                        message: message,
+                        context: { source: 'test-page' }
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const result = await response.json();
+                
+                responseEl.textContent = JSON.stringify(result, null, 2);
+                log(`응답 받음: ${result.type}`, 'success');
+                
+                // AI 응답 메시지 표시
+                if (result.message) {
+                    log(`AI 응답: ${result.message.substring(0, 100)}...`);
+                }
+
+            } catch (error) {
+                responseEl.textContent = `오류: ${error.message}`;
+                log(`메시지 전송 실패: ${error.message}`, 'error');
+            } finally {
+                sendBtn.disabled = false;
+                sendBtn.textContent = '메시지 전송';
+            }
+        }
+
+        function connectWebSocket() {
+            if (!authToken) {
+                alert('먼저 로그인해주세요');
+                return;
+            }
+
+            if (socket && socket.connected) {
+                log('WebSocket 이미 연결됨');
+                return;
+            }
+
+            try {
+                log('WebSocket 연결 시도...');
+                
+                socket = io(WS_BASE, {
+                    path: '/ws',
+                    transports: ['websocket', 'polling'],
+                    auth: { token: authToken },
+                    extraHeaders: { 'Authorization': `Bearer ${authToken}` },
+                    query: { token: authToken },
+                    reconnection: true,
+                    forceNew: true,
+                    timeout: 20000
+                });
+
+                socket.on('connect', () => {
+                    document.getElementById('ws-status').className = 'status success';
+                    document.getElementById('ws-status').textContent = `✅ WebSocket 연결됨 (ID: ${socket.id})`;
+                    log('WebSocket 연결 성공', 'success');
+                });
+
+                socket.on('disconnect', (reason) => {
+                    document.getElementById('ws-status').className = 'status error';
+                    document.getElementById('ws-status').textContent = `❌ WebSocket 연결 해제: ${reason}`;
+                    log(`WebSocket 연결 해제: ${reason}`, 'error');
+                });
+
+                socket.on('connect_error', (error) => {
+                    document.getElementById('ws-status').className = 'status error';
+                    document.getElementById('ws-status').textContent = `❌ WebSocket 연결 오류: ${error.message}`;
+                    log(`WebSocket 연결 오류: ${error.message}`, 'error');
+                });
+
+                socket.on('message', (message) => {
+                    log(`WebSocket 메시지 수신: ${JSON.stringify(message)}`);
+                });
+
+                // 추가 이벤트 리스너
+                socket.on('workflow_progress', (data) => {
+                    log(`워크플로우 진행: ${JSON.stringify(data)}`);
+                });
+
+                socket.on('chat_response', (data) => {
+                    log(`채팅 응답: ${JSON.stringify(data)}`);
+                });
+
+            } catch (error) {
+                log(`WebSocket 연결 실패: ${error.message}`, 'error');
+            }
+        }
+
+        function disconnectWebSocket() {
+            if (socket) {
+                socket.disconnect();
+                socket = null;
+                document.getElementById('ws-status').className = 'status info';
+                document.getElementById('ws-status').textContent = 'WebSocket 연결 해제됨';
+                log('WebSocket 연결 해제');
+            }
+        }
+
+        function clearLogs() {
+            document.getElementById('logs').textContent = '';
+        }
+
+        // 페이지 로드 시 실행
+        window.onload = function() {
+            log(`테스트 페이지 로드 완료 (세션 ID: ${sessionId})`);
+            checkAuth();
+        };
+
+        // 페이지 언로드 시 WebSocket 정리
+        window.onbeforeunload = function() {
+            if (socket) {
+                socket.disconnect();
+            }
+        };
+    </script>
+</body>
+</html>

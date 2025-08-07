@@ -1,0 +1,426 @@
+openapi: 3.0.3
+info:
+  title: API Gateway Proxy API
+  version: 1.0.0
+  description: API Gateway 프록시 라우팅 명세 (섹션 2.1 기반)
+  contact:
+    name: Backend Team - Core
+    email: backend-core@automation-system.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Development server (Gateway)
+  - url: https://api.automation-system.com/v1
+    description: Production server (Gateway)
+
+x-proxy-configuration:
+  description: 프록시 라우팅 설정
+  routes:
+    - path: /devices
+      target: http://device-service:8101
+      service: Device Management Service
+    - path: /mcp
+      target: http://mcp-service:8201
+      service: MCP Integration Service
+    - path: /llm
+      target: http://llm-service:8301
+      service: LLM Service
+    - path: /workflows
+      target: http://workflow-engine:8401
+      service: Workflow Engine Service
+    - path: /storage
+      target: http://storage:8001
+      service: Storage Service
+      requiresRole: administrator
+
+paths:
+  /devices/{proxy+}:
+    x-proxy-target: Device Management Service
+    get:
+      summary: Device Service 프록시 (GET)
+      description: Device Management Service로 GET 요청을 프록시합니다.
+      operationId: proxyDeviceGet
+      tags:
+        - Proxy
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: proxy+
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Device Service의 나머지 경로
+      responses:
+        '200':
+          description: 성공적인 프록시 응답
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    
+    post:
+      summary: Device Service 프록시 (POST)
+      description: Device Management Service로 POST 요청을 프록시합니다.
+      operationId: proxyDevicePost
+      tags:
+        - Proxy
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: proxy+
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+        required: false
+      responses:
+        '200':
+          description: 성공적인 프록시 응답
+        '201':
+          description: 리소스 생성됨
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    
+    put:
+      summary: Device Service 프록시 (PUT)
+      operationId: proxyDevicePut
+      tags:
+        - Proxy
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: proxy+
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+        required: false
+      responses:
+        '200':
+          description: 성공적인 프록시 응답
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    
+    delete:
+      summary: Device Service 프록시 (DELETE)
+      operationId: proxyDeviceDelete
+      tags:
+        - Proxy
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: proxy+
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 성공적인 프록시 응답
+        '204':
+          description: 콘텐츠 없음
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /mcp/{proxy+}:
+    x-proxy-target: MCP Integration Service
+    get:
+      summary: MCP Service 프록시 (GET)
+      operationId: proxyMcpGet
+      tags:
+        - Proxy
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: proxy+
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 성공적인 프록시 응답
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    
+    post:
+      summary: MCP Service 프록시 (POST)
+      operationId: proxyMcpPost
+      tags:
+        - Proxy
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: proxy+
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+        required: false
+      responses:
+        '200':
+          description: 성공적인 프록시 응답
+        '202':
+          description: 비동기 처리 시작됨
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /llm/{proxy+}:
+    x-proxy-target: LLM Service
+    get:
+      summary: LLM Service 프록시 (GET)
+      operationId: proxyLlmGet
+      tags:
+        - Proxy
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: proxy+
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 성공적인 프록시 응답
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    
+    post:
+      summary: LLM Service 프록시 (POST)
+      operationId: proxyLlmPost
+      tags:
+        - Proxy
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: proxy+
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+        required: false
+      responses:
+        '200':
+          description: 성공적인 프록시 응답
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /workflows/{proxy+}:
+    x-proxy-target: Workflow Engine Service
+    get:
+      summary: Workflow Service 프록시 (GET)
+      operationId: proxyWorkflowGet
+      tags:
+        - Proxy
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: proxy+
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 성공적인 프록시 응답
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    
+    post:
+      summary: Workflow Service 프록시 (POST)
+      operationId: proxyWorkflowPost
+      tags:
+        - Proxy
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: proxy+
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+        required: false
+      responses:
+        '200':
+          description: 성공적인 프록시 응답
+        '201':
+          description: 워크플로우 생성됨
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /storage/{proxy+}:
+    x-proxy-target: Storage Service
+    x-requires-role: administrator
+    get:
+      summary: Storage Service 프록시 (GET) - 관리자 전용
+      operationId: proxyStorageGet
+      tags:
+        - Proxy
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: proxy+
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 성공적인 프록시 응답
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    
+    post:
+      summary: Storage Service 프록시 (POST) - 관리자 전용
+      operationId: proxyStoragePost
+      tags:
+        - Proxy
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: proxy+
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+        required: false
+      responses:
+        '200':
+          description: 성공적인 프록시 응답
+        '201':
+          description: 리소스 생성됨
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+components:
+  responses:
+    Unauthorized:
+      description: 인증되지 않은 요청
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "UNAUTHORIZED"
+            message: "Authentication required"
+            timestamp: "2024-01-15T10:30:00Z"
+    
+    Forbidden:
+      description: 권한 부족
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "FORBIDDEN"
+            message: "Insufficient permissions"
+            timestamp: "2024-01-15T10:30:00Z"
+    
+    ServiceUnavailable:
+      description: 대상 서비스 사용 불가
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "SERVICE_UNAVAILABLE"
+            message: "Target service is temporarily unavailable"
+            timestamp: "2024-01-15T10:30:00Z"
+            details:
+              service: "Device Management Service"
+              reason: "Connection timeout"
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+        - timestamp
+      properties:
+        error:
+          type: string
+          description: 오류 코드
+        message:
+          type: string
+          description: 오류 메시지
+        timestamp:
+          type: string
+          format: date-time
+          description: 오류 발생 시간
+        details:
+          type: object
+          additionalProperties: true
+          description: 추가 오류 정보
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT 토큰 기반 인증
+
+tags:
+  - name: Proxy
+    description: 마이크로서비스 프록시 라우팅

@@ -1,0 +1,340 @@
+#!/bin/bash
+
+# ========================================
+# 통합 자동화 시스템 v3.1 - 스마트 백업 스크립트
+# Prisma 스키마 동기화 문제 해결 버전
+# ========================================
+
+set -e  # 에러 발생 시 스크립트 종료
+
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+BACKUP_DIR="/Users/leesg/Documents/work_ops/automation-system/backups/$TIMESTAMP"
+PROJECT_DIR="/Users/leesg/Documents/work_ops/automation-system"
+
+echo "=== 🚀 스마트 백업 시작 (v3.1) ==="
+echo "백업 시간: $(date)"
+echo "백업 위치: $BACKUP_DIR"
+echo ""
+
+# 백업 디렉토리 생성
+mkdir -p "$BACKUP_DIR"/{images,data,schema,scripts}
+
+# 1. Docker 이미지 백업
+echo "📦 1/6 Docker 이미지 백업 중..."
+cd "$BACKUP_DIR/images"
+
+echo "  - Gateway 백업..."
+docker save automation-system/gateway:latest -o gateway-$TIMESTAMP.tar
+
+echo "  - Storage 백업..."
+docker save automation-system/storage:latest -o storage-$TIMESTAMP.tar
+
+echo "  - Device Service 백업..."
+docker save automation-system/device-service:latest -o device-service-$TIMESTAMP.tar
+
+echo "  - MCP Service 백업..."
+docker save automation-system/mcp-service:latest -o mcp-service-$TIMESTAMP.tar
+
+echo "  - LLM Service 백업..."
+docker save automation-system/llm-service:latest -o llm-service-$TIMESTAMP.tar
+
+echo "  - Workflow Engine 백업..."
+docker save automation-system/workflow-engine:latest -o workflow-engine-$TIMESTAMP.tar
+
+echo "  - Main App 백업..."
+docker save automation-system/main-app:latest -o main-app-$TIMESTAMP.tar
+
+echo "✅ Docker 이미지 백업 완료"
+echo ""
+
+# 2. 🔥 NEW: Prisma 스키마 및 마이그레이션 백업
+echo "🎯 2/6 Prisma 스키마 백업 중..."
+cd "$BACKUP_DIR/schema"
+
+# Prisma 스키마 파일 백업
+cp "$PROJECT_DIR/services/storage/prisma/schema.prisma" "./prisma-schema-$TIMESTAMP.prisma"
+
+# Prisma 마이그레이션 히스토리 백업
+docker exec automation-postgres pg_dump -U postgres -d automation -t _prisma_migrations > "./prisma-migrations-$TIMESTAMP.sql"
+
+# 현재 데이터베이스 스키마 구조 백업 (DDL만)
+docker exec automation-postgres pg_dump -U postgres -d automation --schema-only > "./database-schema-$TIMESTAMP.sql"
+
+echo "✅ Prisma 스키마 백업 완료"
+echo ""
+
+# 3. 데이터베이스 데이터 백업
+echo "🗄️ 3/6 데이터베이스 데이터 백업 중..."
+cd "$BACKUP_DIR/data"
+
+echo "  - PostgreSQL 데이터 백업..."
+docker exec automation-postgres pg_dump -U postgres automation --data-only > "postgres-data-$TIMESTAMP.sql"
+
+echo "  - PostgreSQL 전체 백업 (스키마+데이터)..."
+docker exec automation-postgres pg_dump -U postgres automation > "postgres-full-$TIMESTAMP.sql"
+
+echo "  - MongoDB 백업..."
+docker exec automation-mongodb mongodump --archive --db=automation --username=admin --password=automation_mongo_pass_2024 --authenticationDatabase=admin > "mongodb-$TIMESTAMP.archive"
+
+echo "  - Redis 백업..."
+docker exec automation-redis redis-cli -a automation_redis_pass_2024 --rdb /tmp/redis-backup.rdb
+docker cp automation-redis:/tmp/redis-backup.rdb "./redis-$TIMESTAMP.rdb"
+
+echo "✅ 데이터베이스 백업 완료"
+echo ""
+
+# 4. 🔥 NEW: 환경 설정 및 설정 파일 백업
+echo "⚙️ 4/6 환경 설정 백업 중..."
+cd "$BACKUP_DIR/scripts"
+
+# Docker Compose 설정
+cp "$PROJECT_DIR/docker-compose.yml" "./docker-compose-$TIMESTAMP.yml"
+
+# 환경 변수 (민감 정보 제외)
+if [ -f "$PROJECT_DIR/.env" ]; then
+    grep -v -E "(PASSWORD|SECRET|KEY|TOKEN)" "$PROJECT_DIR/.env" > "./env-public-$TIMESTAMP.txt" || true
+fi
+
+# 서비스 설정 파일들
+mkdir -p "./configs"
+find "$PROJECT_DIR/services" -name "*.json" -o -name "*.yaml" -o -name "*.yml" | while read config_file; do
+    relative_path=${config_file#$PROJECT_DIR/}
+    mkdir -p "./configs/$(dirname "$relative_path")"
+    cp "$config_file" "./configs/$relative_path"
+done
+
+echo "✅ 환경 설정 백업 완료"
+echo ""
+
+# 5. 🔥 NEW: 스마트 복원 스크립트 생성
+echo "🧠 5/6 스마트 복원 스크립트 생성 중..."
+cd "$BACKUP_DIR"
+
+cat > "smart-restore.sh" << 'RESTORE_SCRIPT_EOF'
+#!/bin/bash
+
+# ========================================
+# 스마트 복원 스크립트 - Prisma 동기화 포함
+# ========================================
+
+set -e
+
+BACKUP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$(dirname "$BACKUP_DIR")")"
+TIMESTAMP="TIMESTAMP_PLACEHOLDER"
+
+echo "=== 🔄 스마트 복원 시작 ==="
+echo "백업 위치: $BACKUP_DIR"
+echo "프로젝트 위치: $PROJECT_DIR"
+echo ""
+
+# 1. 시스템 중지
+echo "1️⃣ 시스템 중지 중..."
+cd "$PROJECT_DIR"
+docker-compose down
+echo "✅ 시스템 중지 완료"
+echo ""
+
+# 2. Docker 이미지 복원
+echo "2️⃣ Docker 이미지 복원 중..."
+cd "$BACKUP_DIR/images"
+
+for image_file in *.tar; do
+    if [ -f "$image_file" ]; then
+        echo "  - $image_file 복원 중..."
+        docker load -i "$image_file"
+    fi
+done
+echo "✅ Docker 이미지 복원 완료"
+echo ""
+
+# 3. 데이터베이스 서비스 시작
+echo "3️⃣ 데이터베이스 서비스 시작 중..."
+cd "$PROJECT_DIR"
+docker-compose up -d postgres mongodb redis minio influxdb
+sleep 20
+echo "✅ 데이터베이스 서비스 시작 완료"
+echo ""
+
+# 4. 🔥 PostgreSQL 확장 및 스키마 설정
+echo "4️⃣ PostgreSQL 확장 설정 중..."
+docker exec automation-postgres psql -U postgres -d automation -c "
+    CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";
+    CREATE EXTENSION IF NOT EXISTS citext;
+    CREATE EXTENSION IF NOT EXISTS btree_gin;
+"
+echo "✅ PostgreSQL 확장 설정 완료"
+echo ""
+
+# 5. 🔥 Prisma 스키마 동기화
+echo "5️⃣ Prisma 스키마 동기화 중..."
+cd "$PROJECT_DIR"
+
+# Storage Service 시작 (Prisma 동기화를 위해)
+docker-compose up -d storage
+sleep 10
+
+# Prisma DB Push (스키마 강제 동기화)
+echo "  - Prisma 스키마 동기화..."
+docker exec automation-storage npx prisma db push --force-reset
+
+# Prisma 마이그레이션 히스토리 복원
+echo "  - 마이그레이션 히스토리 복원..."
+docker exec -i automation-postgres psql -U postgres -d automation < "$BACKUP_DIR/schema/prisma-migrations-$TIMESTAMP.sql" || true
+
+echo "✅ Prisma 스키마 동기화 완료"
+echo ""
+
+# 6. 데이터 복원
+echo "6️⃣ 데이터 복원 중..."
+
+# PostgreSQL 데이터만 복원 (스키마는 이미 Prisma로 생성됨)
+echo "  - PostgreSQL 데이터 복원..."
+docker exec -i automation-postgres psql -U postgres -d automation < "$BACKUP_DIR/data/postgres-data-$TIMESTAMP.sql"
+
+# MongoDB 복원
+echo "  - MongoDB 복원..."
+docker exec -i automation-mongodb mongorestore --archive --db=automation --username=admin --password=automation_mongo_pass_2024 --authenticationDatabase=admin --drop < "$BACKUP_DIR/data/mongodb-$TIMESTAMP.archive"
+
+# Redis 복원
+echo "  - Redis 복원..."
+docker cp "$BACKUP_DIR/data/redis-$TIMESTAMP.rdb" automation-redis:/tmp/
+docker exec automation-redis redis-cli -a automation_redis_pass_2024 FLUSHALL
+# Redis는 재시작으로 RDB 로드
+docker-compose restart redis
+
+echo "✅ 데이터 복원 완료"
+echo ""
+
+# 7. 전체 시스템 시작
+echo "7️⃣ 전체 시스템 시작 중..."
+docker-compose up -d
+sleep 30
+echo "✅ 전체 시스템 시작 완료"
+echo ""
+
+# 8. 복원 검증
+echo "8️⃣ 복원 검증 중..."
+echo "  - 컨테이너 상태 확인..."
+docker ps --format "table {{.Names}}\t{{.Status}}" | grep automation | head -8
+
+echo "  - API 테스트..."
+sleep 10
+TOKEN=$(curl -s -X POST http://localhost:8080/api/v1/auth/login -H "Content-Type: application/json" -d '{"username": "admin", "password": "Admin123!@#"}' | jq -r '.accessToken')
+
+if [ "$TOKEN" != "null" ] && [ "$TOKEN" != "" ]; then
+    echo "✅ 인증: 성공"
+    
+    DEVICE_COUNT=$(curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/devices | jq -r '.total // 0')
+    echo "✅ 장비 수: $DEVICE_COUNT"
+    
+    MCP_COUNT=$(curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/mcp/servers | jq -r '.total // 0')
+    echo "✅ MCP 서버 수: $MCP_COUNT"
+else
+    echo "❌ 인증 실패 - 수동 확인 필요"
+fi
+
+echo ""
+echo "🎉 스마트 복원 완료!"
+echo ""
+echo "📍 접근 URL:"
+echo "  - Main Application: http://localhost:3001"
+echo "  - API Gateway: http://localhost:8080"
+echo ""
+echo "🔍 추가 확인사항:"
+echo "  - 대시보드에서 5/5 서비스 상태 확인"
+echo "  - 장비 및 MCP 서버 정상 동작 확인"
+echo "  - 워크플로우 실행 테스트"
+RESTORE_SCRIPT_EOF
+
+# 스크립트에 실제 타임스탬프 삽입
+sed -i '' "s/TIMESTAMP_PLACEHOLDER/$TIMESTAMP/g" "smart-restore.sh"
+chmod +x "smart-restore.sh"
+
+echo "✅ 스마트 복원 스크립트 생성 완료"
+echo ""
+
+# 6. 백업 메타데이터 생성
+echo "📋 6/6 백업 메타데이터 생성 중..."
+
+cat > "backup-info.md" << BACKUP_INFO_EOF
+# 스마트 백업 정보 v3.1
+
+## 📦 백업 개요
+- **백업 시간**: $(date)
+- **백업 ID**: $TIMESTAMP
+- **백업 타입**: 완전 백업 (이미지 + 데이터 + 스키마)
+- **Prisma 동기화**: 포함 ✅
+
+## 🔧 주요 개선사항
+1. **Prisma 스키마 동기화**: 복원 시 자동 처리
+2. **마이그레이션 히스토리**: 완전 보존
+3. **환경 설정 백업**: 설정 파일 포함
+4. **스마트 복원**: 한 번 실행으로 완전 복원
+
+## 📁 백업 구조
+\`\`\`
+$TIMESTAMP/
+├── images/           # Docker 이미지 (7개)
+├── data/            # 데이터베이스 데이터
+├── schema/          # Prisma 스키마 + 마이그레이션
+├── scripts/         # 환경 설정 + 설정 파일
+├── smart-restore.sh # 스마트 복원 스크립트 ⭐
+└── backup-info.md   # 이 파일
+\`\`\`
+
+## 🚀 복원 방법
+
+### 완전 자동 복원 (권장)
+\`\`\`bash
+cd $BACKUP_DIR
+./smart-restore.sh
+\`\`\`
+
+### 특징
+- ✅ Prisma 스키마 자동 동기화
+- ✅ 데이터베이스 확장 자동 설치
+- ✅ 마이그레이션 히스토리 복원
+- ✅ 복원 후 자동 검증
+- ✅ 스키마 불일치 문제 완전 해결
+
+## 📊 백업 내용
+- **Docker 이미지**: 7개 서비스
+- **PostgreSQL**: 스키마 + 데이터 + 마이그레이션
+- **MongoDB**: 전체 컬렉션
+- **Redis**: RDB 스냅샷
+- **Prisma**: 스키마 파일 + 마이그레이션 히스토리
+- **설정**: Docker Compose + 서비스 설정
+
+## ⚠️ 복원 후 확인사항
+1. 대시보드 접속: http://localhost:3001
+2. 서비스 상태 확인: 5/5 정상
+3. API 테스트: 장비, MCP, 워크플로우
+4. 기능 테스트: 새 장비 추가, 워크플로우 실행
+
+## 🔒 보안 정보
+- 환경 변수 중 민감 정보는 제외됨
+- 복원 후 .env 파일 수동 설정 필요
+- API 키 및 비밀번호는 별도 관리
+BACKUP_INFO_EOF
+
+# 백업 크기 계산
+BACKUP_SIZE=$(du -sh "$BACKUP_DIR" | cut -f1)
+
+echo "✅ 백업 메타데이터 생성 완료"
+echo ""
+
+echo "🎉 스마트 백업 완료!"
+echo ""
+echo "📊 백업 정보:"
+echo "  - 백업 ID: $TIMESTAMP"
+echo "  - 백업 크기: $BACKUP_SIZE"
+echo "  - 복원 방법: ./smart-restore.sh"
+echo ""
+echo "🔥 주요 개선사항:"
+echo "  ✅ Prisma 스키마 동기화 자동화"
+echo "  ✅ 마이그레이션 히스토리 보존"
+echo "  ✅ 원클릭 복원 지원"
+echo "  ✅ 스키마 불일치 문제 완전 해결"
+echo ""
+echo "📍 백업 위치: $BACKUP_DIR"

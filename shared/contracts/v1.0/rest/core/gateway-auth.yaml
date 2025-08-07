@@ -1,0 +1,388 @@
+openapi: 3.0.3
+info:
+  title: API Gateway Authentication API
+  version: 1.0.0
+  description: 인증 및 토큰 관리 API (섹션 2.1 기반)
+  contact:
+    name: Backend Team - Core
+    email: backend-core@automation-system.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Development server
+  - url: https://api.automation-system.com/v1
+    description: Production server
+
+paths:
+  /auth/login:
+    post:
+      summary: 사용자 로그인
+      description: 사용자 자격 증명을 검증하고 JWT 토큰을 발급합니다.
+      operationId: login
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            examples:
+              valid_user:
+                summary: 유효한 사용자 로그인
+                value:
+                  username: "admin"
+                  password: "secure_password123"
+      responses:
+        '200':
+          description: 로그인 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+              examples:
+                success:
+                  summary: 성공적인 로그인 응답
+                  value:
+                    accessToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    refreshToken: "dGhpcyBpcyBhIHJlZnJlc2ggdG9rZW4="
+                    expiresIn: 3600
+                    tokenType: "Bearer"
+                    user:
+                      id: "550e8400-e29b-41d4-a716-446655440000"
+                      username: "admin"
+                      role: "administrator"
+        '400':
+          description: 잘못된 요청
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalid_input:
+                  summary: 입력 데이터 오류
+                  value:
+                    error: "INVALID_INPUT"
+                    message: "Username and password are required"
+                    timestamp: "2024-01-15T10:30:00Z"
+        '401':
+          description: 인증 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalid_credentials:
+                  summary: 잘못된 자격 증명
+                  value:
+                    error: "INVALID_CREDENTIALS"
+                    message: "Invalid username or password"
+                    timestamp: "2024-01-15T10:30:00Z"
+        '429':
+          description: 요청 한도 초과
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/refresh:
+    post:
+      summary: 토큰 갱신
+      description: 리프레시 토큰을 사용하여 새로운 액세스 토큰을 발급합니다.
+      operationId: refreshToken
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+            examples:
+              valid_refresh:
+                summary: 유효한 리프레시 토큰
+                value:
+                  refreshToken: "dGhpcyBpcyBhIHJlZnJlc2ggdG9rZW4="
+      responses:
+        '200':
+          description: 토큰 갱신 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+              examples:
+                success:
+                  summary: 성공적인 토큰 갱신
+                  value:
+                    accessToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    expiresIn: 3600
+                    tokenType: "Bearer"
+        '400':
+          description: 잘못된 요청
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 유효하지 않은 리프레시 토큰
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/logout:
+    post:
+      summary: 로그아웃
+      description: 현재 토큰을 무효화합니다.
+      operationId: logout
+      tags:
+        - Authentication
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 로그아웃 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Successfully logged out"
+        '401':
+          description: 인증 필요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/verify:
+    get:
+      summary: 토큰 검증
+      description: 현재 토큰의 유효성을 검증합니다.
+      operationId: verifyToken
+      tags:
+        - Authentication
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 토큰 유효
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserInfo'
+        '401':
+          description: 토큰 무효 또는 만료
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    LoginRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 50
+          pattern: '^[a-zA-Z0-9_-]+$'
+          description: 사용자명 (영문, 숫자, 언더스코어, 하이픈만 허용)
+          example: "admin"
+        password:
+          type: string
+          minLength: 8
+          maxLength: 128
+          description: 비밀번호 (최소 8자)
+          example: "secure_password123"
+        rememberMe:
+          type: boolean
+          default: false
+          description: 로그인 상태 유지 여부
+
+    LoginResponse:
+      type: object
+      required:
+        - accessToken
+        - refreshToken
+        - expiresIn
+        - tokenType
+        - user
+      properties:
+        accessToken:
+          type: string
+          description: JWT 액세스 토큰
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        refreshToken:
+          type: string
+          description: 리프레시 토큰
+          example: "dGhpcyBpcyBhIHJlZnJlc2ggdG9rZW4="
+        expiresIn:
+          type: integer
+          description: 토큰 만료 시간(초)
+          example: 3600
+          minimum: 1
+        tokenType:
+          type: string
+          description: 토큰 타입
+          example: "Bearer"
+          default: "Bearer"
+        user:
+          $ref: '#/components/schemas/UserInfo'
+
+    RefreshRequest:
+      type: object
+      required:
+        - refreshToken
+      properties:
+        refreshToken:
+          type: string
+          description: 리프레시 토큰
+          example: "dGhpcyBpcyBhIHJlZnJlc2ggdG9rZW4="
+
+    TokenResponse:
+      type: object
+      required:
+        - accessToken
+        - expiresIn
+        - tokenType
+      properties:
+        accessToken:
+          type: string
+          description: 새로운 JWT 액세스 토큰
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        expiresIn:
+          type: integer
+          description: 토큰 만료 시간(초)
+          example: 3600
+          minimum: 1
+        tokenType:
+          type: string
+          description: 토큰 타입
+          example: "Bearer"
+          default: "Bearer"
+
+    UserInfo:
+      type: object
+      required:
+        - id
+        - username
+        - role
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: 사용자 고유 ID
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        username:
+          type: string
+          description: 사용자명
+          example: "admin"
+        role:
+          type: string
+          enum: [administrator, operator, viewer]
+          description: 사용자 역할
+          example: "administrator"
+        email:
+          type: string
+          format: email
+          description: 이메일 주소
+          example: "admin@automation-system.com"
+        createdAt:
+          type: string
+          format: date-time
+          description: 계정 생성 시간
+          example: "2024-01-01T00:00:00Z"
+        lastLoginAt:
+          type: string
+          format: date-time
+          description: 마지막 로그인 시간
+          example: "2024-01-15T10:30:00Z"
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+        - timestamp
+      properties:
+        error:
+          type: string
+          description: 오류 코드
+          example: "INVALID_CREDENTIALS"
+        message:
+          type: string
+          description: 오류 메시지
+          example: "Invalid username or password"
+        timestamp:
+          type: string
+          format: date-time
+          description: 오류 발생 시간
+          example: "2024-01-15T10:30:00Z"
+        details:
+          type: object
+          additionalProperties: true
+          description: 추가 오류 상세 정보
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT 토큰을 Authorization 헤더에 Bearer 스키마로 전송
+
+  parameters:
+    CorrelationId:
+      name: X-Correlation-ID
+      in: header
+      description: 요청 추적을 위한 고유 ID
+      schema:
+        type: string
+        format: uuid
+
+  headers:
+    CorrelationId:
+      description: 응답 추적을 위한 고유 ID
+      schema:
+        type: string
+        format: uuid
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Authentication
+    description: 사용자 인증 관련 API

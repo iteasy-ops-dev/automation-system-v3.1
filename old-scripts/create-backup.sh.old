@@ -1,0 +1,153 @@
+#!/bin/bash
+
+# 통합 자동화 시스템 자동 백업 스크립트
+
+set -e
+PROJECT_DIR="/Users/leesg/Documents/work_ops/automation-system"
+BACKUP_ID="$(date +%Y%m%d_%H%M%S)"
+BACKUP_DIR="$PROJECT_DIR/backups/$BACKUP_ID"
+
+echo "🚀 자동 백업 시작: $BACKUP_ID"
+mkdir -p $BACKUP_DIR/{images,data}
+
+# 1. Docker 이미지 백업
+echo "📦 Docker 이미지 백업 중..."
+cd $BACKUP_DIR/images
+
+docker save automation-system/gateway:latest -o gateway-$BACKUP_ID.tar &
+docker save automation-system/storage:latest -o storage-$BACKUP_ID.tar &
+docker save automation-system/device-service:latest -o device-service-$BACKUP_ID.tar &
+docker save automation-system/mcp-service:latest -o mcp-service-$BACKUP_ID.tar &
+docker save automation-system/llm-service:latest -o llm-service-$BACKUP_ID.tar &
+docker save automation-system/main-app:latest -o main-app-$BACKUP_ID.tar &
+
+# 대용량 이미지는 별도 처리
+docker save automation-system/workflow-engine:latest -o workflow-engine-$BACKUP_ID.tar
+
+wait  # 병렬 작업 완료 대기
+
+# 2. 데이터베이스 백업
+echo "🗄️ 데이터베이스 백업 중..."
+cd $BACKUP_DIR/data
+
+echo "백업 생성: $(date)" > backup-info.txt
+echo "버전: v3.1 (Gateway Health Routes 추가)" >> backup-info.txt
+echo "주요 변경: Dashboard 마이크로서비스 상태 통합" >> backup-info.txt
+
+# PostgreSQL 백업
+docker exec automation-postgres pg_dump -U postgres automation > postgres-$BACKUP_ID.sql
+
+# Prisma 스키마와 마이그레이션 백업
+echo "🔧 Prisma 스키마 백업 중..."
+docker cp automation-storage:/app/prisma $BACKUP_DIR/data/prisma-schema
+docker exec automation-storage npx prisma migrate status > $BACKUP_DIR/data/prisma-migration-status.txt
+
+# MongoDB 백업
+docker exec automation-mongodb mongodump --archive --db=automation \
+  --username=admin --password=automation_mongo_pass_2024 \
+  --authenticationDatabase=admin > mongodb-$BACKUP_ID.archive
+
+# Redis 백업 (선택적)
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+docker exec automation-redis redis-cli -a automation_redis_pass_2024 --rdb /tmp/redis-backup.rdb
+docker cp automation-redis:/tmp/redis-backup.rdb ./redis-$BACKUP_ID.rdb
+
+# 3. 소스코드 백업 (수정된 파일들)
+echo "📁 소스코드 백업 중..."
+cd $PROJECT_DIR
+tar -czf $BACKUP_DIR/data/source-code-$BACKUP_ID.tar.gz \
+  services/core/gateway/src/routes/health.routes.ts \
+  services/core/gateway/src/app.ts \
+  frontend/main-app/src/pages/DashboardPage.tsx \
+  docker-compose.yml \
+  .env
+
+# 4. 복원 스크립트 생성
+cat > $BACKUP_DIR/restore-backup.sh << 'RESTORE_EOF'
+#!/bin/bash
+# 자동 생성된 복원 스크립트
+
+set -e
+BACKUP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$(dirname "$BACKUP_DIR")")"
+
+echo "🔄 백업 복원 시작: $(basename $BACKUP_DIR)"
+
+# 기존 시스템 중지
+cd "$PROJECT_DIR"
+docker-compose down
+
+# 이미지 복원
+echo "📦 Docker 이미지 복원..."
+cd "$BACKUP_DIR/images"
+for tar_file in *.tar; do
+    echo "  - $tar_file 복원 중..."
+    docker load -i "$tar_file"
+done
+
+# 데이터베이스 서비스 시작
+echo "🗄️ 데이터베이스 복원..."
+cd "$PROJECT_DIR"
+docker-compose up -d postgres mongodb redis
+
+sleep 15  # 서비스 준비 대기
+
+# PostgreSQL 복원
+echo "  - PostgreSQL 복원..."
+docker exec automation-postgres psql -U postgres -c "DROP DATABASE IF EXISTS automation;"
+docker exec automation-postgres psql -U postgres -c "CREATE DATABASE automation;"
+docker exec -i automation-postgres psql -U postgres -d automation < "$BACKUP_DIR/data/postgres-"*.sql
+
+# MongoDB 복원
+echo "  - MongoDB 복원..."
+docker exec -i automation-mongodb mongorestore --archive --db=automation \
+  --username=admin --password=automation_mongo_pass_2024 \
+  --authenticationDatabase=admin --drop < "$BACKUP_DIR/data/mongodb-"*.archive
+
+# 소스코드 복원 (선택적)
+if [ -f "$BACKUP_DIR/data/source-code-"*.tar.gz ]; then
+    echo "📁 소스코드 복원..."
+    cd "$PROJECT_DIR"
+    tar -xzf "$BACKUP_DIR/data/source-code-"*.tar.gz
+fi
+
+# 전체 시스템 시작
+echo "🚀 시스템 시작..."
+docker-compose up -d postgres mongodb redis minio influxdb kafka zookeeper \
+  storage gateway device-service mcp-service llm-service workflow-engine main-app
+
+echo "⏳ 시스템 준비 대기..."
+sleep 30
+
+# 스키마 동기화
+if [ -f "$PROJECT_DIR/sync-db-schema.sh" ]; then
+    echo "🔧 데이터베이스 스키마 동기화..."
+    cd "$PROJECT_DIR"
+    ./sync-db-schema.sh
+fi
+
+echo "✅ 복원 완료!"
+echo "📍 접속: http://localhost:3001"
+echo "🔍 Health Check: http://localhost:8080/api/v1/system/health"
+RESTORE_EOF
+
+chmod +x $BACKUP_DIR/restore-backup.sh
+
+# 5. 백업 완료 보고
+echo "✅ 백업 완료!"
+echo "📍 백업 위치: $BACKUP_DIR"
+echo "📊 백업 크기: $(du -sh $BACKUP_DIR | cut -f1)"
+echo "🔄 복원 명령: cd $BACKUP_DIR && ./restore-backup.sh"
+
+# 6. 백업 목록 업데이트
+echo "📋 백업 목록 업데이트..."
+cat > $PROJECT_DIR/backups/latest-backup.txt << LATEST_EOF
+최신 백업: $BACKUP_ID
+생성 시간: $(date)
+크기: $(du -sh $BACKUP_DIR | cut -f1)
+위치: $BACKUP_DIR
+복원: cd $BACKUP_DIR && ./restore-backup.sh
+특이사항: Gateway Health Routes 추가, Dashboard 수정 포함
+LATEST_EOF
+
+echo "🎉 자동 백업 완료!"

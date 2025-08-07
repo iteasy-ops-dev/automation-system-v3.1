@@ -1,0 +1,210 @@
+openapi: 3.0.3
+info:
+  title: Storage Service Authentication API
+  version: 1.0.0
+  description: Storage Service의 사용자 인증 관련 API
+  contact:
+    name: Backend Team - Core
+    email: backend-core@automation-system.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8001/api/v1
+    description: Development server
+  - url: http://storage-service:8001/api/v1
+    description: Internal service communication
+
+paths:
+  /storage/auth/authenticate:
+    post:
+      summary: 사용자 인증
+      description: 사용자 인증을 처리하고 사용자 정보를 반환합니다.
+      operationId: authenticateUser
+      tags:
+        - Authentication
+      security: []  # 인증 엔드포인트는 JWT 불필요
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                  minLength: 3
+                  maxLength: 50
+                  description: 사용자명
+                  example: "admin"
+                password:
+                  type: string
+                  minLength: 8
+                  description: 비밀번호
+                  example: "Admin123!@#"
+      responses:
+        '200':
+          description: 인증 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserInfo'
+        '401':
+          description: 인증 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalid_credentials:
+                  summary: 잘못된 자격증명
+                  value:
+                    error: "AUTHENTICATION_FAILED"
+                    message: "Invalid username or password"
+                    timestamp: "2024-01-15T10:30:00Z"
+                user_inactive:
+                  summary: 비활성 사용자
+                  value:
+                    error: "USER_INACTIVE"
+                    message: "User account is inactive"
+                    timestamp: "2024-01-15T10:30:00Z"
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /storage/auth/users/{userId}:
+    get:
+      summary: 사용자 정보 조회
+      description: 특정 사용자의 정보를 조회합니다.
+      operationId: getUserById
+      tags:
+        - Authentication
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: 사용자 고유 ID
+          example: "00000000-0000-0000-0000-000000000001"
+      responses:
+        '200':
+          description: 사용자 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserInfo'
+        '404':
+          description: 사용자를 찾을 수 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    UserInfo:
+      type: object
+      required:
+        - id
+        - username
+        - role
+        - email
+        - isActive
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: 사용자 고유 ID
+          example: "00000000-0000-0000-0000-000000000001"
+        username:
+          type: string
+          description: 사용자명
+          example: "admin"
+        role:
+          type: string
+          enum: [administrator, operator, viewer]
+          description: 사용자 역할
+          example: "administrator"
+        email:
+          type: string
+          format: email
+          description: 이메일 주소
+          example: "admin@automation-system.local"
+        fullName:
+          type: string
+          description: 전체 이름
+          example: "System Administrator"
+        isActive:
+          type: boolean
+          description: 활성 상태
+          example: true
+        lastLoginAt:
+          type: string
+          format: date-time
+          description: 마지막 로그인 시간
+          example: "2024-01-15T10:00:00Z"
+        createdAt:
+          type: string
+          format: date-time
+          description: 생성 시간
+          example: "2024-01-01T00:00:00Z"
+        updatedAt:
+          type: string
+          format: date-time
+          description: 수정 시간
+          example: "2024-01-15T10:30:00Z"
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+        - timestamp
+      properties:
+        error:
+          type: string
+          description: 오류 코드
+          example: "AUTHENTICATION_FAILED"
+        message:
+          type: string
+          description: 오류 메시지
+          example: "Invalid username or password"
+        timestamp:
+          type: string
+          format: date-time
+          description: 오류 발생 시간
+          example: "2024-01-15T10:30:00Z"
+        details:
+          type: object
+          additionalProperties: true
+          description: 추가 오류 상세 정보
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Authentication
+    description: 사용자 인증 API

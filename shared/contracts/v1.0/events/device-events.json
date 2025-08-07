@@ -1,0 +1,385 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DeviceEvent",
+  "description": "장비 관련 이벤트 스키마 (섹션 2.7 기반)",
+  "type": "object",
+  "required": ["eventId", "eventType", "timestamp", "deviceId"],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "이벤트 고유 ID",
+      "examples": ["550e8400-e29b-41d4-a716-446655440000"]
+    },
+    "eventType": {
+      "type": "string",
+      "enum": [
+        "DeviceCreated",
+        "DeviceUpdated", 
+        "DeviceDeleted",
+        "DeviceStatusChanged",
+        "MetricThresholdExceeded",
+        "DeviceHealthCheck",
+        "DeviceAlertTriggered",
+        "DeviceMaintenanceScheduled"
+      ],
+      "description": "이벤트 타입",
+      "examples": ["DeviceStatusChanged"]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "이벤트 발생 시간",
+      "examples": ["2024-01-15T10:30:00Z"]
+    },
+    "deviceId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "장비 고유 ID",
+      "examples": ["660e8400-e29b-41d4-a716-446655440001"]
+    },
+    "payload": {
+      "type": "object",
+      "description": "이벤트별 페이로드",
+      "oneOf": [
+        {
+          "if": {
+            "properties": {
+              "eventType": {
+                "const": "DeviceCreated"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "device": {
+                "type": "object",
+                "required": ["name", "type"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "장비명",
+                    "examples": ["web-server-01"]
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": ["server", "network", "storage", "iot"],
+                    "description": "장비 타입",
+                    "examples": ["server"]
+                  },
+                  "groupId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "소속 그룹 ID"
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "장비 메타데이터"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "eventType": {
+                "const": "DeviceUpdated"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "changes": {
+                "type": "object",
+                "properties": {
+                  "previousValues": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "변경 전 값들"
+                  },
+                  "currentValues": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "변경 후 값들"
+                  },
+                  "changedFields": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "변경된 필드 목록"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "eventType": {
+                "const": "DeviceStatusChanged"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "previousStatus": {
+                "type": "string",
+                "enum": ["online", "offline", "error", "maintenance"],
+                "description": "이전 상태",
+                "examples": ["online"]
+              },
+              "currentStatus": {
+                "type": "string",
+                "enum": ["online", "offline", "error", "maintenance"],
+                "description": "현재 상태",
+                "examples": ["offline"]
+              },
+              "reason": {
+                "type": "string",
+                "description": "상태 변경 이유",
+                "examples": ["Connection timeout"]
+              },
+              "duration": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "이전 상태 지속 시간 (초)"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "eventType": {
+                "const": "MetricThresholdExceeded"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "metric": {
+                "type": "string",
+                "enum": ["cpu", "memory", "disk", "network", "temperature", "power"],
+                "description": "메트릭 타입",
+                "examples": ["cpu"]
+              },
+              "threshold": {
+                "type": "number",
+                "description": "설정된 임계값",
+                "examples": [90.0]
+              },
+              "currentValue": {
+                "type": "number",
+                "description": "현재 측정값",
+                "examples": [95.5]
+              },
+              "unit": {
+                "type": "string",
+                "description": "측정 단위",
+                "examples": ["percent"]
+              },
+              "severity": {
+                "type": "string",
+                "enum": ["low", "medium", "high", "critical"],
+                "description": "심각도",
+                "examples": ["high"]
+              },
+              "duration": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "임계값 초과 지속 시간 (초)"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "eventType": {
+                "const": "DeviceHealthCheck"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "checkType": {
+                "type": "string",
+                "enum": ["scheduled", "manual", "triggered"],
+                "description": "헬스체크 타입"
+              },
+              "result": {
+                "type": "string",
+                "enum": ["healthy", "warning", "critical", "unknown"],
+                "description": "헬스체크 결과"
+              },
+              "metrics": {
+                "type": "object",
+                "properties": {
+                  "responseTime": {
+                    "type": "number",
+                    "description": "응답 시간 (ms)"
+                  },
+                  "uptime": {
+                    "type": "integer",
+                    "description": "가동 시간 (초)"
+                  },
+                  "resourceUsage": {
+                    "type": "object",
+                    "properties": {
+                      "cpu": {"type": "number", "minimum": 0, "maximum": 100},
+                      "memory": {"type": "number", "minimum": 0, "maximum": 100},
+                      "disk": {"type": "number", "minimum": 0, "maximum": 100}
+                    }
+                  }
+                }
+              },
+              "issues": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "발견된 문제점 목록"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "eventType": {
+                "const": "DeviceAlertTriggered"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "alertId": {
+                "type": "string",
+                "format": "uuid",
+                "description": "알림 고유 ID"
+              },
+              "alertType": {
+                "type": "string",
+                "enum": ["metric_threshold", "heartbeat_timeout", "error_detected", "maintenance_required"],
+                "description": "알림 타입"
+              },
+              "severity": {
+                "type": "string",
+                "enum": ["low", "medium", "high", "critical"],
+                "description": "심각도"
+              },
+              "message": {
+                "type": "string",
+                "description": "알림 메시지"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": true,
+                "description": "추가 상세 정보"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "이벤트를 발생시킨 사용자 ID"
+        },
+        "correlationId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "관련 작업 추적을 위한 ID"
+        },
+        "source": {
+          "type": "string",
+          "description": "이벤트 발생 소스",
+          "examples": ["device-service", "monitoring-agent", "manual"]
+        },
+        "version": {
+          "type": "string",
+          "description": "이벤트 스키마 버전",
+          "examples": ["1.0.0"]
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "이벤트 태그"
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "eventId": "550e8400-e29b-41d4-a716-446655440000",
+      "eventType": "DeviceCreated",
+      "timestamp": "2024-01-15T10:30:00Z",
+      "deviceId": "660e8400-e29b-41d4-a716-446655440001",
+      "payload": {
+        "device": {
+          "name": "web-server-01",
+          "type": "server",
+          "groupId": "770e8400-e29b-41d4-a716-446655440002",
+          "metadata": {
+            "ip": "192.168.1.100",
+            "os": "Ubuntu 22.04"
+          }
+        }
+      },
+      "metadata": {
+        "userId": "admin",
+        "correlationId": "880e8400-e29b-41d4-a716-446655440003",
+        "source": "device-service",
+        "version": "1.0.0"
+      }
+    },
+    {
+      "eventId": "550e8400-e29b-41d4-a716-446655440010",
+      "eventType": "DeviceStatusChanged",
+      "timestamp": "2024-01-15T10:35:00Z",
+      "deviceId": "660e8400-e29b-41d4-a716-446655440001",
+      "payload": {
+        "previousStatus": "online",
+        "currentStatus": "offline",
+        "reason": "Connection timeout",
+        "duration": 3600
+      },
+      "metadata": {
+        "correlationId": "880e8400-e29b-41d4-a716-446655440004",
+        "source": "monitoring-agent",
+        "version": "1.0.0",
+        "tags": ["production", "critical"]
+      }
+    },
+    {
+      "eventId": "550e8400-e29b-41d4-a716-446655440020",
+      "eventType": "MetricThresholdExceeded",
+      "timestamp": "2024-01-15T10:40:00Z",
+      "deviceId": "660e8400-e29b-41d4-a716-446655440001",
+      "payload": {
+        "metric": "cpu",
+        "threshold": 90.0,
+        "currentValue": 95.5,
+        "unit": "percent",
+        "severity": "high",
+        "duration": 300
+      },
+      "metadata": {
+        "correlationId": "880e8400-e29b-41d4-a716-446655440005",
+        "source": "monitoring-agent",
+        "version": "1.0.0",
+        "tags": ["performance", "alert"]
+      }
+    }
+  ]
+}

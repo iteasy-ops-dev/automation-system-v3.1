@@ -1,0 +1,655 @@
+version: '3.8'
+
+services:
+  # ========================================
+  # Core Services
+  # ========================================
+  
+  # API Gateway Service
+  gateway:
+    build:
+      context: ./services/core/gateway
+      dockerfile: Dockerfile
+    image: automation-system/gateway:latest
+    container_name: automation-gateway
+    ports:
+      - "80:8080"      # HTTP: 호스트 80 → 컨테이너 8080
+      - "443:8080"     # HTTPS: 호스트 443 → 컨테이너 8080
+      - "8080:8080"    # Direct: 호스트 8080 → 컨테이너 8080
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - GATEWAY_PORT=8080  # 명시적 포트 설정
+      - GATEWAY_HOST=0.0.0.0
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_ACCESS_SECRET=${JWT_SECRET}
+      - JWT_REFRESH_SECRET=${JWT_SECRET}_refresh
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-1h}
+      - REFRESH_TOKEN_EXPIRES_IN=${REFRESH_TOKEN_EXPIRES_IN:-7d}
+      - REDIS_URL=${REDIS_URL}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_LAZY_CONNECT=false
+      - STORAGE_SERVICE_URL=http://storage:8001
+      - DEVICE_SERVICE_URL=http://device-service:8101
+      - MCP_SERVICE_URL=http://mcp-service:8201
+      - LLM_SERVICE_URL=http://llm-service:8301
+      - WORKFLOW_SERVICE_URL=http://workflow-engine:8401
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3001,http://localhost:3002,http://localhost:3003}
+    depends_on:
+      - redis
+      - storage
+    networks:
+      - frontend-net
+      - backend-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:8080/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  # Storage Service
+  storage:
+    build:
+      context: ./services/storage
+      dockerfile: Dockerfile
+    image: automation-system/storage:latest
+    container_name: automation-storage
+    env_file:
+      - .env
+    ports:
+      - "8001:8001"
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - DATABASE_URL=postgresql://postgres:automation_postgres_pass_2024@postgres:5432/automation
+      - POSTGRES_URL=postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/automation
+      - MONGODB_URL=mongodb://admin:${MONGO_ROOT_PASSWORD}@mongodb:27017/automation?authSource=admin
+      - MONGO_ROOT_USERNAME=${MONGO_ROOT_USERNAME:-admin}
+      - MONGO_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD}
+      - REDIS_URL=${REDIS_URL}
+      - S3_ENDPOINT=http://minio:9000
+      - S3_ACCESS_KEY=${MINIO_ROOT_USER}
+      - S3_SECRET_KEY=${MINIO_ROOT_PASSWORD}
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME:-automation-data}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - ENABLE_EVENT_BUS=true
+      - KAFKA_BROKERS=kafka:9092
+    depends_on:
+      - postgres
+      - mongodb
+      - redis
+      - minio
+    networks:
+      - backend-net
+      - data-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  # ========================================
+  # Domain Services
+  # ========================================
+
+  # Device Management Service
+  device-service:
+    build:
+      context: ./services/domain/device-management
+      dockerfile: Dockerfile
+    image: automation-system/device-service:latest
+    container_name: automation-device-service
+    ports:
+      - "8101:8101"
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - LOG_LEVEL=info  # 운영 로그 레벨로 복구
+      - STORAGE_SERVICE_URL=http://storage:8001
+      - REDIS_URL=${REDIS_URL}
+      - KAFKA_BROKERS=kafka:9092
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
+      - INFLUXDB_ORG=${INFLUXDB_ORG:-automation}
+      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET:-device-metrics}
+      - METRICS_COLLECTION_INTERVAL=${METRICS_COLLECTION_INTERVAL:-300000}  # 5 minutes
+    depends_on:
+      - storage
+      - kafka
+      - influxdb
+    networks:
+      - backend-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:8101/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  # MCP Integration Service
+  mcp-service:
+    build:
+      context: ./services/domain/mcp-integration
+      dockerfile: Dockerfile
+    image: automation-system/mcp-service:latest
+    container_name: automation-mcp-service
+    ports:
+      - "8201:8201"
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - DATABASE_URL=${DATABASE_URL}
+      - STORAGE_SERVICE_URL=http://storage:8001
+      - KAFKA_BROKERS=kafka:9092
+      - REDIS_URL=redis://redis:6379
+      - BULL_REDIS_URL=redis://redis:6379
+      - JWT_SECRET=mcp-integration-secret-key-change-in-production
+      - MCP_CONNECTION_POOL_SIZE=${MCP_CONNECTION_POOL_SIZE:-10}
+      - MCP_CONNECTION_TIMEOUT=${MCP_CONNECTION_TIMEOUT:-30000}
+      - MCP_EXECUTION_TIMEOUT=${MCP_EXECUTION_TIMEOUT:-300000}  # 5 minutes
+    depends_on:
+      - storage
+      - kafka
+      - redis
+    networks:
+      - backend-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:8201/api/v1/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # LLM Service
+  llm-service:
+    build:
+      context: ./services/domain/llm
+      dockerfile: Dockerfile
+    image: automation-system/llm-service:latest
+    container_name: automation-llm-service
+    ports:
+      - "8301:8301"
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - STORAGE_SERVICE_URL=http://storage:8001
+      - KAFKA_BROKERS=kafka:9092
+      - REDIS_URL=${REDIS_URL}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-automation_postgres_pass_2024}
+      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-automation_postgres_pass_2024}@postgres:5432/automation
+      - MONGODB_URL=mongodb://automation_app:automation_app_password@mongodb:27017/automation?authSource=automation
+      - MONGODB_DB=automation
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - LLM_CACHE_TTL=${LLM_CACHE_TTL:-3600}  # 1 hour
+      - TOKEN_LIMIT_WARNING_THRESHOLD=${TOKEN_LIMIT_WARNING_THRESHOLD:-80}
+    depends_on:
+      - storage
+      - kafka
+      - redis
+      - postgres
+    networks:
+      - backend-net
+      - data-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:8301/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Workflow Engine Service
+  workflow-engine:
+    build:
+      context: ./services/domain/workflow-engine
+      dockerfile: Dockerfile
+    image: automation-system/workflow-engine:latest
+    container_name: automation-workflow-engine
+    ports:
+      - "8401:8401"
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=8401
+      - STORAGE_SERVICE_URL=http://storage:8001
+      - KAFKA_BROKERS=kafka:9092
+      - REDIS_URL=${REDIS_URL}
+      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-automation_postgres_pass_2024}@postgres:5432/automation
+      - POSTGRES_URL=postgresql://postgres:${POSTGRES_PASSWORD:-automation_postgres_pass_2024}@postgres:5432/automation
+      - MONGODB_URL=mongodb://automation_app:automation_app_password@mongodb:27017/automation?authSource=automation
+      - N8N_API_URL=http://automation-n8n:5678
+      - N8N_API_KEY=n8n_api_0953a966a0548abd7c3c1a8769e6976036b2dc3430d0de254799876277c00066b4c85bda8723f94d
+      - DEVICE_SERVICE_URL=http://device-service:8101
+      - MCP_SERVICE_URL=http://mcp-service:8201
+      - LLM_SERVICE_URL=http://llm-service:8301
+      - GATEWAY_SERVICE_URL=http://gateway:8080
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    depends_on:
+      - storage
+      - kafka
+      - redis
+    networks:
+      - backend-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:8401/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # n8n Workflow Editor (독립 컨테이너) - 안정적 버전으로 변경
+  n8n:
+    image: n8nio/n8n:0.235.0  # API Key 없이 작동하는 구버전
+    container_name: automation-n8n
+    ports:
+      - "5678:5678"  # n8n UI
+    environment:
+      # Basic Auth로 임시 전환 (API Key 생성을 위해)
+      - N8N_USER_MANAGEMENT_DISABLED=true  # false에서 true로 변경 - Basic Auth만 사용
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=admin
+      - N8N_BASIC_AUTH_PASSWORD=Admin123!@#
+      - N8N_DISABLE_UI=false
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5678/
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:-automation_n8n_key_2024}
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - NODE_OPTIONS=--max-old-space-size=2048
+      
+    depends_on:
+      - postgres
+    networks:
+      - backend-net
+      - frontend-net  # UI 접속용
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:5678/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+  # ========================================
+  # Supporting Services
+  # ========================================
+
+  # Apache Kafka Event Bus
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: automation-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - backend-net
+    restart: unless-stopped
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: automation-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "9094:9094"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_LOG_RETENTION_HOURS: 168  # 7 days
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824  # 1GB
+      KAFKA_LOG_CLEANUP_POLICY: delete
+      KAFKA_COMPRESSION_TYPE: snappy
+    networks:
+      - backend-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Schema Registry for Kafka
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.4.0
+    container_name: automation-schema-registry
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:9092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      # 단일 브로커 환경 최적화 설정
+      SCHEMA_REGISTRY_KAFKASTORE_TOPIC_REPLICATION_FACTOR: 1
+      SCHEMA_REGISTRY_KAFKASTORE_INIT_TIMEOUT_MS: 300000
+      SCHEMA_REGISTRY_LEADER_ELIGIBILITY: true
+      SCHEMA_REGISTRY_LEADER_ELECTION_DELAY: false
+      # Group coordination 타임아웃 최적화 - 더 공격적으로 단축
+      SCHEMA_REGISTRY_KAFKAGROUP_SESSION_TIMEOUT_MS: 15000
+      SCHEMA_REGISTRY_KAFKAGROUP_HEARTBEAT_INTERVAL_MS: 5000
+      SCHEMA_REGISTRY_KAFKAGROUP_REBALANCE_TIMEOUT_MS: 30000
+      # 단일 인스턴스에 최적화 - 즉시 master로 시작
+      SCHEMA_REGISTRY_SCHEMA_REGISTRY_GROUP_ID: schema-registry-single
+      SCHEMA_REGISTRY_MODE_MUTABILITY: true
+      # 메타데이터 캐시 최적화
+      SCHEMA_REGISTRY_SCHEMA_CACHE_SIZE: 1000
+      SCHEMA_REGISTRY_SCHEMA_CACHE_EXPIRY_SECS: 300
+      # REST API 서버 최적화
+      SCHEMA_REGISTRY_THREAD_POOL_MIN: 8
+      SCHEMA_REGISTRY_THREAD_POOL_MAX: 200
+      # 디버깅을 위한 로그 레벨
+      SCHEMA_REGISTRY_LOG4J_ROOT_LOGLEVEL: INFO
+    networks:
+      - backend-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget -q -O - http://localhost:8081/subjects || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
+  # Monitoring Service
+  monitoring:
+    build:
+      context: ./services/supporting/monitoring
+      dockerfile: Dockerfile
+    image: automation-system/monitoring:latest
+    container_name: automation-monitoring
+    ports:
+      - "9090:9090"  # Prometheus
+      - "3000:3000"  # Grafana
+      - "5601:5601"  # Kibana
+      - "16686:16686" # Jaeger UI
+      - "14268:14268" # Jaeger collector
+    environment:
+      - KAFKA_BROKERS=kafka:9092
+      - PROMETHEUS_RETENTION_TIME=${PROMETHEUS_RETENTION_TIME:-15d}
+      - GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+    depends_on:
+      - kafka
+      - elasticsearch
+    networks:
+      - backend-net
+      - monitoring-net
+    restart: unless-stopped
+
+  # ========================================
+  # Frontend Applications
+  # ========================================
+
+  # Main Application
+  main-app:
+    build:
+      context: ./frontend/main-app
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_BASE_URL=http://localhost:8080
+        - VITE_WS_HOST=localhost:8080
+    image: automation-system/main-app:latest
+    container_name: automation-main-app
+    ports:
+      - "3001:80"
+    environment:
+      - NODE_ENV=production
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - gateway
+    networks:
+      - frontend-net
+    restart: unless-stopped
+
+  # Workflow Editor Application
+  workflow-editor:
+    build:
+      context: ./frontend/workflow-editor
+      dockerfile: Dockerfile
+    image: automation-system/workflow-editor:latest
+    container_name: automation-workflow-editor
+    ports:
+      - "3002:80"
+    environment:
+      - REACT_APP_API_URL=http://localhost
+      - REACT_APP_N8N_URL=http://localhost:5678
+    depends_on:
+      - gateway
+      - workflow-engine
+    networks:
+      - frontend-net
+    restart: unless-stopped
+
+  # Admin Portal Application
+  admin-portal:
+    build:
+      context: ./frontend/admin-portal
+      dockerfile: Dockerfile
+    image: automation-system/admin-portal:latest
+    container_name: automation-admin-portal
+    ports:
+      - "3003:80"
+    environment:
+      - REACT_APP_API_URL=http://localhost
+      - REACT_APP_MONITORING_URL=http://localhost:3000
+    depends_on:
+      - gateway
+    networks:
+      - frontend-net
+    restart: unless-stopped
+
+  # ========================================
+  # Data Stores
+  # ========================================
+
+  # PostgreSQL - Primary relational database
+  postgres:
+    image: postgres:15-alpine
+    container_name: automation-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=automation
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/docker/postgres/init:/docker-entrypoint-initdb.d
+    networks:
+      - data-net
+      - backend-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # MongoDB - Document database
+  mongodb:
+    image: mongo:7.0
+    container_name: automation-mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_ROOT_USERNAME:-admin}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD}
+      - MONGO_INITDB_DATABASE=automation
+    volumes:
+      - mongodb_data:/data/db
+      - ./infrastructure/docker/mongodb/init:/docker-entrypoint-initdb.d
+    networks:
+      - data-net
+      - backend-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis - Caching and session store
+  redis:
+    image: redis:7.2-alpine
+    container_name: automation-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend-net
+      - data-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # InfluxDB - Time series database for metrics
+  influxdb:
+    image: influxdb:2.7
+    container_name: automation-influxdb
+    ports:
+      - "8086:8086"
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=${INFLUXDB_USERNAME:-admin}
+      - DOCKER_INFLUXDB_INIT_PASSWORD=${INFLUXDB_PASSWORD}
+      - DOCKER_INFLUXDB_INIT_ORG=${INFLUXDB_ORG:-automation}
+      - DOCKER_INFLUXDB_INIT_BUCKET=${INFLUXDB_BUCKET:-device-metrics}
+      - DOCKER_INFLUXDB_INIT_RETENTION=30d
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUXDB_TOKEN}
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    networks:
+      - data-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # MinIO - S3-compatible object storage
+  minio:
+    image: minio/minio:latest
+    container_name: automation-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"  # Console
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    networks:
+      - data-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Elasticsearch - Search and analytics
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: automation-elasticsearch
+    ports:
+      - "9200:9200"
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - monitoring-net
+      - data-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+# ========================================
+# Networks
+# ========================================
+networks:
+  frontend-net:
+    driver: bridge
+    name: automation-frontend
+    
+  backend-net:
+    driver: bridge
+    name: automation-backend
+    
+  data-net:
+    driver: bridge
+    name: automation-data
+    
+  monitoring-net:
+    driver: bridge
+    name: automation-monitoring
+
+# ========================================
+# Volumes
+# ========================================
+volumes:
+  postgres_data:
+    driver: local
+    name: automation-postgres-data
+    
+  mongodb_data:
+    driver: local
+    name: automation-mongodb-data
+    
+  redis_data:
+    driver: local
+    name: automation-redis-data
+    
+  influxdb_data:
+    driver: local
+    name: automation-influxdb-data
+    
+  minio_data:
+    driver: local
+    name: automation-minio-data
+    
+  elasticsearch_data:
+    driver: local
+    name: automation-elasticsearch-data
+    
+  n8n_data:
+    driver: local
+    name: automation-n8n-data

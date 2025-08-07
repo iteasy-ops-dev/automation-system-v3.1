@@ -1,0 +1,1202 @@
+openapi: 3.0.3
+info:
+  title: Workflow Engine Service API
+  version: 1.0.0
+  description: 워크플로우 실행 및 관리 API (섹션 2.6 기반)
+  contact:
+    name: Backend Team - Domains
+    email: backend-domains@automation-system.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8401/api/v1
+    description: Development server
+  - url: http://workflow-engine:8401/api/v1
+    description: Internal service communication
+
+paths:
+  /workflows/chat:
+    post:
+      summary: 채팅 기반 워크플로우 실행
+      description: 자연어 입력을 분석하여 적절한 워크플로우를 실행합니다. 섹션 4.1의 채팅 기반 워크플로우 시작점입니다.
+      operationId: executeChatWorkflow
+      tags:
+        - Chat Workflow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatWorkflowRequest'
+            examples:
+              cpu_monitoring:
+                summary: CPU 모니터링 및 재시작
+                value:
+                  sessionId: "550e8400-e29b-41d4-a716-446655440000"
+                  message: "모든 웹 서버의 CPU 사용률을 확인하고 90% 이상인 서버를 재시작해줘"
+                  context:
+                    user: "admin"
+                    priority: "normal"
+              status_check:
+                summary: 서버 상태 확인
+                value:
+                  sessionId: "550e8400-e29b-41d4-a716-446655440000"
+                  message: "프로덕션 서버들의 현재 상태를 알려줘"
+      responses:
+        '200':
+          description: 워크플로우 실행 시작 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatWorkflowResponse'
+              examples:
+                workflow_started:
+                  summary: 워크플로우 시작됨
+                  value:
+                    executionId: "660e8400-e29b-41d4-a716-446655440001"
+                    workflowId: "cpu-monitor-restart-v1"
+                    status: "running"
+                    intent:
+                      action: "monitor_and_restart"
+                      target: "web_servers"
+                      parameters:
+                        metric: "cpu"
+                        threshold: 90
+                        action_type: "restart"
+                    estimatedDuration: 120
+                    steps:
+                      - stepId: "analyze-intent"
+                        name: "의도 분석"
+                        status: "completed"
+                      - stepId: "get-devices"
+                        name: "장비 목록 조회"
+                        status: "running"
+                      - stepId: "collect-metrics"
+                        name: "메트릭 수집"
+                        status: "pending"
+        '400':
+          description: 잘못된 요청 데이터
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 인증 필요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /workflows/executions/{id}:
+    get:
+      summary: 워크플로우 실행 상태 조회
+      description: 특정 워크플로우 실행의 현재 상태를 조회합니다.
+      operationId: getWorkflowExecution
+      tags:
+        - Workflow Execution
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: 실행 고유 ID
+          example: "660e8400-e29b-41d4-a716-446655440001"
+        - name: includeSteps
+          in: query
+          schema:
+            type: boolean
+            default: true
+          description: 단계별 상세 정보 포함 여부
+        - name: includeLogs
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: 실행 로그 포함 여부
+      responses:
+        '200':
+          description: 실행 상태 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowExecutionStatus'
+              examples:
+                running_execution:
+                  summary: 실행 중인 워크플로우
+                  value:
+                    executionId: "660e8400-e29b-41d4-a716-446655440001"
+                    workflowId: "cpu-monitor-restart-v1"
+                    status: "running"
+                    sessionId: "550e8400-e29b-41d4-a716-446655440000"
+                    startedAt: "2024-01-15T10:30:00Z"
+                    progress: 60
+                    steps:
+                      - stepId: "analyze-intent"
+                        name: "의도 분석"
+                        status: "completed"
+                        result:
+                          action: "monitor_and_restart"
+                          confidence: 0.95
+                        duration: 1250
+                      - stepId: "get-devices"
+                        name: "장비 목록 조회"
+                        status: "completed"
+                        result:
+                          devices: ["web-server-01", "web-server-02", "web-server-03"]
+                        duration: 850
+                      - stepId: "collect-metrics"
+                        name: "메트릭 수집"
+                        status: "running"
+                        progress: 66
+                completed_execution:
+                  summary: 완료된 워크플로우
+                  value:
+                    executionId: "770e8400-e29b-41d4-a716-446655440002"
+                    workflowId: "server-status-check-v1"
+                    status: "completed"
+                    sessionId: "550e8400-e29b-41d4-a716-446655440000"
+                    startedAt: "2024-01-15T10:25:00Z"
+                    completedAt: "2024-01-15T10:27:30Z"
+                    duration: 150000
+                    result:
+                      summary: "3대 서버 모두 정상 운영 중"
+                      details:
+                        totalServers: 3
+                        onlineServers: 3
+                        issues: []
+                    steps:
+                      - stepId: "get-servers"
+                        name: "서버 목록 조회"
+                        status: "completed"
+                        result:
+                          count: 3
+                        duration: 500
+                      - stepId: "check-status"
+                        name: "상태 확인"
+                        status: "completed"
+                        result:
+                          healthy: 3
+                          unhealthy: 0
+                        duration: 149500
+        '400':
+          description: 잘못된 실행 ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 인증 필요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: 실행을 찾을 수 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      summary: 워크플로우 실행 취소
+      description: 실행 중인 워크플로우를 취소합니다.
+      operationId: cancelWorkflowExecution
+      tags:
+        - Workflow Execution
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: 실행 고유 ID
+      responses:
+        '200':
+          description: 취소 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  executionId:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    enum: [cancelled]
+                  cancelledAt:
+                    type: string
+                    format: date-time
+                  message:
+                    type: string
+                    example: "Workflow execution cancelled successfully"
+        '400':
+          description: 잘못된 실행 ID 또는 취소 불가능한 상태
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 인증 필요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: 실행을 찾을 수 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /workflows:
+    get:
+      summary: 워크플로우 정의 목록 조회
+      description: 등록된 워크플로우 정의들의 목록을 조회합니다.
+      operationId: getWorkflows
+      tags:
+        - Workflow Definition
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+          description: 카테고리별 필터링
+          example: "monitoring"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, inactive, deprecated]
+          description: 상태별 필터링
+        - name: search
+          in: query
+          schema:
+            type: string
+          description: 워크플로우명 검색
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: 워크플로우 목록 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowListResponse'
+        '400':
+          description: 잘못된 요청 파라미터
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 인증 필요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    post:
+      summary: 워크플로우 정의 생성
+      description: 새로운 워크플로우 정의를 생성합니다.
+      operationId: createWorkflow
+      tags:
+        - Workflow Definition
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkflowCreate'
+      responses:
+        '201':
+          description: 워크플로우 생성 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workflow'
+        '400':
+          description: 잘못된 요청 데이터
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 인증 필요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: 중복된 워크플로우 ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /workflows/{id}/execute:
+    post:
+      summary: 특정 워크플로우 직접 실행
+      description: 워크플로우 ID를 지정하여 직접 실행합니다.
+      operationId: executeWorkflow
+      tags:
+        - Workflow Execution
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 워크플로우 ID
+          example: "cpu-monitor-restart-v1"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkflowExecuteRequest'
+      responses:
+        '200':
+          description: 워크플로우 실행 시작
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowExecuteResponse'
+        '400':
+          description: 잘못된 요청 데이터
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 인증 필요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: 워크플로우를 찾을 수 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /workflows/templates:
+    get:
+      summary: 워크플로우 템플릿 조회
+      description: 사전 정의된 워크플로우 템플릿들을 조회합니다.
+      operationId: getWorkflowTemplates
+      tags:
+        - Workflow Templates
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+          description: 카테고리별 필터링
+        - name: complexity
+          in: query
+          schema:
+            type: string
+            enum: [simple, medium, complex]
+          description: 복잡도별 필터링
+      responses:
+        '200':
+          description: 템플릿 목록 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowTemplatesResponse'
+        '400':
+          description: 잘못된 요청 파라미터
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 인증 필요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /executions:
+    get:
+      summary: 워크플로우 실행 이력 조회
+      description: 워크플로우 실행 이력을 조회합니다.
+      operationId: getExecutions
+      tags:
+        - Workflow Execution
+      parameters:
+        - name: workflowId
+          in: query
+          schema:
+            type: string
+          description: 워크플로우 ID별 필터링
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, running, completed, failed, cancelled]
+          description: 상태별 필터링
+        - name: sessionId
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: 세션 ID별 필터링
+        - name: start
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: 시작 시간 필터
+        - name: end
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: 종료 시간 필터
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: sortBy
+          in: query
+          schema:
+            type: string
+            enum: [startedAt, completedAt, duration]
+            default: startedAt
+        - name: sortOrder
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+      responses:
+        '200':
+          description: 실행 이력 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionListResponse'
+        '400':
+          description: 잘못된 요청 파라미터
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 인증 필요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    ChatWorkflowRequest:
+      type: object
+      required:
+        - sessionId
+        - message
+      properties:
+        sessionId:
+          type: string
+          format: uuid
+          description: 대화 세션 ID
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        message:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: 사용자 메시지
+          example: "모든 웹 서버의 CPU 사용률을 확인하고 90% 이상인 서버를 재시작해줘"
+        context:
+          type: object
+          additionalProperties: true
+          description: 추가 컨텍스트 정보
+          example:
+            user: "admin"
+            priority: "normal"
+            source: "chat"
+        options:
+          type: object
+          description: 실행 옵션
+          properties:
+            async:
+              type: boolean
+              default: true
+              description: 비동기 실행 여부
+            timeout:
+              type: integer
+              minimum: 30
+              maximum: 3600
+              default: 300
+              description: 타임아웃 (초)
+            dryRun:
+              type: boolean
+              default: false
+              description: 드라이 런 모드 (실제 실행 없이 계획만)
+
+    ChatWorkflowResponse:
+      type: object
+      required:
+        - executionId
+        - workflowId
+        - status
+        - intent
+      properties:
+        executionId:
+          type: string
+          format: uuid
+          description: 실행 고유 ID
+          example: "660e8400-e29b-41d4-a716-446655440001"
+        workflowId:
+          type: string
+          description: 선택된 워크플로우 ID
+          example: "cpu-monitor-restart-v1"
+        status:
+          type: string
+          enum: [pending, running]
+          description: 실행 상태
+          example: "running"
+        intent:
+          type: object
+          description: 분석된 의도
+          required:
+            - action
+            - target
+          properties:
+            action:
+              type: string
+              description: 수행할 작업
+              example: "monitor_and_restart"
+            target:
+              type: string
+              description: 대상 객체
+              example: "web_servers"
+            parameters:
+              type: object
+              additionalProperties: true
+              description: 작업 매개변수
+              example:
+                metric: "cpu"
+                threshold: 90
+                action_type: "restart"
+            confidence:
+              type: number
+              minimum: 0
+              maximum: 1
+              description: 의도 분석 신뢰도
+              example: 0.95
+        estimatedDuration:
+          type: integer
+          description: 예상 실행 시간 (초)
+          example: 120
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowStepSummary'
+          description: 실행 단계 개요
+        startedAt:
+          type: string
+          format: date-time
+          description: 실행 시작 시간
+          example: "2024-01-15T10:30:00Z"
+
+    WorkflowExecutionStatus:
+      type: object
+      required:
+        - executionId
+        - workflowId
+        - status
+        - startedAt
+        - steps
+      properties:
+        executionId:
+          type: string
+          format: uuid
+          description: 실행 고유 ID
+        workflowId:
+          type: string
+          description: 워크플로우 ID
+        status:
+          type: string
+          enum: [pending, running, completed, failed, cancelled]
+          description: 실행 상태
+        sessionId:
+          type: string
+          format: uuid
+          description: 대화 세션 ID
+        startedAt:
+          type: string
+          format: date-time
+          description: 실행 시작 시간
+        completedAt:
+          type: string
+          format: date-time
+          description: 실행 완료 시간
+        duration:
+          type: integer
+          description: 실행 시간 (밀리초)
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: 진행률 (%)
+        result:
+          type: object
+          additionalProperties: true
+          description: 실행 결과 (완료 시)
+        error:
+          type: string
+          description: 오류 메시지 (실패 시)
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowStep'
+          description: 실행 단계별 상세 정보
+        metadata:
+          type: object
+          additionalProperties: true
+          description: 추가 메타데이터
+        logs:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowLog'
+          description: 실행 로그
+
+    WorkflowStep:
+      type: object
+      required:
+        - stepId
+        - name
+        - status
+      properties:
+        stepId:
+          type: string
+          description: 단계 고유 ID
+          example: "analyze-intent"
+        name:
+          type: string
+          description: 단계명
+          example: "의도 분석"
+        description:
+          type: string
+          description: 단계 설명
+        status:
+          type: string
+          enum: [pending, running, completed, failed, skipped]
+          description: 단계 상태
+          example: "completed"
+        startedAt:
+          type: string
+          format: date-time
+          description: 단계 시작 시간
+        completedAt:
+          type: string
+          format: date-time
+          description: 단계 완료 시간
+        duration:
+          type: integer
+          description: 단계 실행 시간 (밀리초)
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: 단계 진행률 (%)
+        result:
+          type: object
+          additionalProperties: true
+          description: 단계 실행 결과
+        error:
+          type: string
+          description: 오류 메시지 (실패 시)
+        retryCount:
+          type: integer
+          minimum: 0
+          description: 재시도 횟수
+        dependencies:
+          type: array
+          items:
+            type: string
+          description: 의존하는 단계 ID 목록
+
+    WorkflowStepSummary:
+      type: object
+      required:
+        - stepId
+        - name
+        - status
+      properties:
+        stepId:
+          type: string
+          description: 단계 ID
+        name:
+          type: string
+          description: 단계명
+        status:
+          type: string
+          enum: [pending, running, completed, failed, skipped]
+          description: 단계 상태
+        estimatedDuration:
+          type: integer
+          description: 예상 실행 시간 (초)
+
+    WorkflowLog:
+      type: object
+      required:
+        - timestamp
+        - level
+        - message
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: 로그 시간
+        level:
+          type: string
+          enum: [debug, info, warn, error]
+          description: 로그 레벨
+        message:
+          type: string
+          description: 로그 메시지
+        stepId:
+          type: string
+          description: 관련 단계 ID
+        details:
+          type: object
+          additionalProperties: true
+          description: 추가 상세 정보
+
+    Workflow:
+      type: object
+      required:
+        - id
+        - name
+        - version
+        - definition
+        - status
+        - createdAt
+      properties:
+        id:
+          type: string
+          description: 워크플로우 고유 ID
+          example: "cpu-monitor-restart-v1"
+        name:
+          type: string
+          description: 워크플로우명
+          example: "CPU 모니터링 및 재시작"
+        description:
+          type: string
+          description: 워크플로우 설명
+        version:
+          type: string
+          description: 버전
+          example: "1.0.0"
+        category:
+          type: string
+          description: 카테고리
+          example: "monitoring"
+        definition:
+          type: object
+          description: n8n 워크플로우 정의
+          additionalProperties: true
+        triggers:
+          type: array
+          items:
+            type: string
+          description: 트리거 조건 목록
+        parameters:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowParameter'
+          description: 입력 매개변수 정의
+        status:
+          type: string
+          enum: [active, inactive, deprecated]
+          description: 워크플로우 상태
+        tags:
+          type: array
+          items:
+            type: string
+          description: 태그 목록
+        estimatedDuration:
+          type: integer
+          description: 예상 실행 시간 (초)
+        createdAt:
+          type: string
+          format: date-time
+          description: 생성 시간
+        updatedAt:
+          type: string
+          format: date-time
+          description: 수정 시간
+        createdBy:
+          type: string
+          description: 생성자
+
+    WorkflowParameter:
+      type: object
+      required:
+        - name
+        - type
+        - required
+      properties:
+        name:
+          type: string
+          description: 매개변수명
+        type:
+          type: string
+          enum: [string, number, boolean, object, array]
+          description: 매개변수 타입
+        required:
+          type: boolean
+          description: 필수 여부
+        description:
+          type: string
+          description: 매개변수 설명
+        default:
+          description: 기본값
+        validation:
+          type: object
+          description: 유효성 검증 규칙
+
+    WorkflowCreate:
+      type: object
+      required:
+        - name
+        - definition
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: 워크플로우명
+        description:
+          type: string
+          maxLength: 500
+          description: 워크플로우 설명
+        category:
+          type: string
+          description: 카테고리
+        definition:
+          type: object
+          description: n8n 워크플로우 정의
+          additionalProperties: true
+        triggers:
+          type: array
+          items:
+            type: string
+          description: 트리거 조건
+        parameters:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowParameter'
+        tags:
+          type: array
+          items:
+            type: string
+
+    WorkflowExecuteRequest:
+      type: object
+      properties:
+        parameters:
+          type: object
+          additionalProperties: true
+          description: 실행 매개변수
+        options:
+          type: object
+          properties:
+            async:
+              type: boolean
+              default: true
+            timeout:
+              type: integer
+            priority:
+              type: string
+              enum: [low, normal, high, urgent]
+              default: normal
+        metadata:
+          type: object
+          additionalProperties: true
+          description: 추가 메타데이터
+
+    WorkflowExecuteResponse:
+      type: object
+      required:
+        - executionId
+        - status
+      properties:
+        executionId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, running]
+        estimatedDuration:
+          type: integer
+        queuePosition:
+          type: integer
+          description: 큐 내 위치 (pending 상태시)
+
+    WorkflowListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - limit
+        - offset
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Workflow'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    WorkflowTemplate:
+      type: object
+      required:
+        - id
+        - name
+        - category
+        - complexity
+        - definition
+      properties:
+        id:
+          type: string
+          description: 템플릿 ID
+        name:
+          type: string
+          description: 템플릿명
+        description:
+          type: string
+          description: 템플릿 설명
+        category:
+          type: string
+          description: 카테고리
+        complexity:
+          type: string
+          enum: [simple, medium, complex]
+          description: 복잡도
+        definition:
+          type: object
+          description: 워크플로우 정의 템플릿
+        examples:
+          type: array
+          items:
+            type: object
+          description: 사용 예제
+        tags:
+          type: array
+          items:
+            type: string
+
+    WorkflowTemplatesResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowTemplate'
+        categories:
+          type: array
+          items:
+            type: string
+          description: 사용 가능한 카테고리 목록
+
+    ExecutionSummary:
+      type: object
+      required:
+        - executionId
+        - workflowId
+        - status
+        - startedAt
+      properties:
+        executionId:
+          type: string
+          format: uuid
+        workflowId:
+          type: string
+        workflowName:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, completed, failed, cancelled]
+        sessionId:
+          type: string
+          format: uuid
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        duration:
+          type: integer
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        result:
+          type: object
+          additionalProperties: true
+        error:
+          type: string
+
+    ExecutionListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - limit
+        - offset
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExecutionSummary'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        statistics:
+          type: object
+          properties:
+            totalExecutions:
+              type: integer
+            completedExecutions:
+              type: integer
+            failedExecutions:
+              type: integer
+            avgDuration:
+              type: number
+            successRate:
+              type: number
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+        - timestamp
+      properties:
+        error:
+          type: string
+          description: 오류 코드
+          example: "WORKFLOW_NOT_FOUND"
+        message:
+          type: string
+          description: 오류 메시지
+          example: "Workflow with ID 'cpu-monitor-restart-v1' not found"
+        timestamp:
+          type: string
+          format: date-time
+          description: 오류 발생 시간
+          example: "2024-01-15T10:30:00Z"
+        details:
+          type: object
+          additionalProperties: true
+          description: 추가 오류 상세 정보
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Chat Workflow
+    description: 채팅 기반 워크플로우 실행 API
+  - name: Workflow Definition
+    description: 워크플로우 정의 관리 API
+  - name: Workflow Execution
+    description: 워크플로우 실행 관리 API
+  - name: Workflow Templates
+    description: 워크플로우 템플릿 API

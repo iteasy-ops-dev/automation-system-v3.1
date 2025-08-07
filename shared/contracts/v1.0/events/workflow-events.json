@@ -1,0 +1,446 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WorkflowEvent",
+  "description": "워크플로우 실행 이벤트 스키마 (섹션 2.7 기반)",
+  "type": "object",
+  "required": ["eventId", "eventType", "timestamp", "workflowId", "executionId"],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "이벤트 고유 ID",
+      "examples": ["550e8400-e29b-41d4-a716-446655440000"]
+    },
+    "eventType": {
+      "type": "string",
+      "enum": [
+        "WorkflowStarted",
+        "WorkflowStepStarted",
+        "WorkflowStepCompleted",
+        "WorkflowStepFailed",
+        "WorkflowStepSkipped",
+        "WorkflowPaused",
+        "WorkflowResumed",
+        "WorkflowCompleted",
+        "WorkflowFailed",
+        "WorkflowCancelled",
+        "WorkflowRetried"
+      ],
+      "description": "이벤트 타입",
+      "examples": ["WorkflowStepCompleted"]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "이벤트 발생 시간",
+      "examples": ["2024-01-15T10:30:00Z"]
+    },
+    "workflowId": {
+      "type": "string",
+      "description": "워크플로우 고유 ID",
+      "examples": ["cpu-monitor-restart-v1"]
+    },
+    "executionId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "실행 고유 ID",
+      "examples": ["660e8400-e29b-41d4-a716-446655440001"]
+    },
+    "payload": {
+      "type": "object",
+      "description": "이벤트별 페이로드",
+      "oneOf": [
+        {
+          "if": {
+            "properties": {
+              "eventType": {
+                "const": "WorkflowStarted"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "workflowName": {
+                "type": "string",
+                "description": "워크플로우명",
+                "examples": ["CPU 모니터링 및 재시작"]
+              },
+              "version": {
+                "type": "string",
+                "description": "워크플로우 버전",
+                "examples": ["1.0.0"]
+              },
+              "triggeredBy": {
+                "type": "string",
+                "enum": ["chat", "schedule", "event", "manual", "api"],
+                "description": "실행 트리거",
+                "examples": ["chat"]
+              },
+              "parameters": {
+                "type": "object",
+                "additionalProperties": true,
+                "description": "실행 매개변수",
+                "examples": [{"threshold": 90, "target": "web_servers"}]
+              },
+              "estimatedDuration": {
+                "type": "integer",
+                "description": "예상 실행 시간 (초)",
+                "examples": [120]
+              },
+              "totalSteps": {
+                "type": "integer",
+                "description": "총 단계 수",
+                "examples": [5]
+              },
+              "priority": {
+                "type": "string",
+                "enum": ["low", "normal", "high", "urgent"],
+                "description": "실행 우선순위",
+                "examples": ["normal"]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "eventType": {
+                "pattern": "^WorkflowStep"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "stepId": {
+                "type": "string",
+                "description": "단계 고유 ID",
+                "examples": ["analyze-intent"]
+              },
+              "stepName": {
+                "type": "string",
+                "description": "단계명",
+                "examples": ["의도 분석"]
+              },
+              "stepType": {
+                "type": "string",
+                "enum": ["llm", "mcp", "device", "condition", "loop", "parallel", "manual"],
+                "description": "단계 타입",
+                "examples": ["llm"]
+              },
+              "stepIndex": {
+                "type": "integer",
+                "description": "단계 순서",
+                "examples": [1]
+              },
+              "result": {
+                "type": "object",
+                "additionalProperties": true,
+                "description": "단계 실행 결과 (완료/실패 시)",
+                "examples": [{"action": "monitor_and_restart", "confidence": 0.95}]
+              },
+              "error": {
+                "type": "string",
+                "description": "오류 메시지 (실패 시)",
+                "examples": ["LLM service unavailable"]
+              },
+              "duration": {
+                "type": "integer",
+                "description": "단계 실행 시간 (밀리초)",
+                "examples": [1250]
+              },
+              "retryCount": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "재시도 횟수",
+                "examples": [0]
+              },
+              "inputData": {
+                "type": "object",
+                "additionalProperties": true,
+                "description": "단계 입력 데이터"
+              },
+              "outputData": {
+                "type": "object",
+                "additionalProperties": true,
+                "description": "단계 출력 데이터"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "eventType": {
+                "enum": ["WorkflowCompleted", "WorkflowFailed", "WorkflowCancelled"]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "result": {
+                "type": "object",
+                "additionalProperties": true,
+                "description": "워크플로우 최종 결과 (완료 시)",
+                "examples": [{
+                  "summary": "3대 서버 중 1대 재시작 완료",
+                  "details": {
+                    "checkedServers": 3,
+                    "restartedServers": 1,
+                    "affectedServices": ["nginx"]
+                  }
+                }]
+              },
+              "error": {
+                "type": "string",
+                "description": "오류 메시지 (실패 시)"
+              },
+              "duration": {
+                "type": "integer",
+                "description": "총 실행 시간 (밀리초)",
+                "examples": [125000]
+              },
+              "completedSteps": {
+                "type": "integer",
+                "description": "완료된 단계 수",
+                "examples": [5]
+              },
+              "failedSteps": {
+                "type": "integer",
+                "description": "실패한 단계 수",
+                "examples": [0]
+              },
+              "skippedSteps": {
+                "type": "integer",
+                "description": "건너뛴 단계 수",
+                "examples": [0]
+              },
+              "resourceUsage": {
+                "type": "object",
+                "properties": {
+                  "llmTokens": {
+                    "type": "integer",
+                    "description": "사용된 LLM 토큰 수"
+                  },
+                  "mcpExecutions": {
+                    "type": "integer",
+                    "description": "MCP 도구 실행 횟수"
+                  },
+                  "deviceOperations": {
+                    "type": "integer",
+                    "description": "장비 작업 횟수"
+                  },
+                  "estimatedCost": {
+                    "type": "number",
+                    "description": "예상 비용 (USD)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "eventType": {
+                "const": "WorkflowRetried"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "retryReason": {
+                "type": "string",
+                "enum": ["step_failure", "timeout", "resource_unavailable", "manual"],
+                "description": "재시도 이유"
+              },
+              "retryCount": {
+                "type": "integer",
+                "description": "현재 재시도 횟수"
+              },
+              "maxRetries": {
+                "type": "integer",
+                "description": "최대 재시도 횟수"
+              },
+              "failedStep": {
+                "type": "string",
+                "description": "실패한 단계 ID"
+              },
+              "retryDelay": {
+                "type": "integer",
+                "description": "재시도 지연 시간 (초)"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "대화 세션 ID (채팅 기반 실행 시)",
+          "examples": ["770e8400-e29b-41d4-a716-446655440002"]
+        },
+        "userId": {
+          "type": "string",
+          "description": "실행 요청자 ID",
+          "examples": ["admin"]
+        },
+        "correlationId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "관련 작업 추적을 위한 ID",
+          "examples": ["880e8400-e29b-41d4-a716-446655440003"]
+        },
+        "source": {
+          "type": "string",
+          "description": "이벤트 발생 소스",
+          "examples": ["workflow-engine", "n8n-core"]
+        },
+        "version": {
+          "type": "string",
+          "description": "이벤트 스키마 버전",
+          "examples": ["1.0.0"]
+        },
+        "environment": {
+          "type": "string",
+          "enum": ["development", "staging", "production"],
+          "description": "실행 환경",
+          "examples": ["production"]
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "이벤트 태그",
+          "examples": [["monitoring", "automation", "critical"]]
+        },
+        "context": {
+          "type": "object",
+          "properties": {
+            "triggerSource": {
+              "type": "string",
+              "description": "실행 트리거 상세 정보"
+            },
+            "originalMessage": {
+              "type": "string",
+              "description": "원본 사용자 메시지 (채팅 기반 시)"
+            },
+            "intent": {
+              "type": "object",
+              "description": "분석된 의도 정보"
+            }
+          }
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "eventId": "550e8400-e29b-41d4-a716-446655440000",
+      "eventType": "WorkflowStarted",
+      "timestamp": "2024-01-15T10:30:00Z",
+      "workflowId": "cpu-monitor-restart-v1",
+      "executionId": "660e8400-e29b-41d4-a716-446655440001",
+      "payload": {
+        "workflowName": "CPU 모니터링 및 재시작",
+        "version": "1.0.0",
+        "triggeredBy": "chat",
+        "parameters": {
+          "threshold": 90,
+          "target": "web_servers"
+        },
+        "estimatedDuration": 120,
+        "totalSteps": 5,
+        "priority": "normal"
+      },
+      "metadata": {
+        "sessionId": "770e8400-e29b-41d4-a716-446655440002",
+        "userId": "admin",
+        "correlationId": "880e8400-e29b-41d4-a716-446655440003",
+        "source": "workflow-engine",
+        "version": "1.0.0",
+        "environment": "production",
+        "tags": ["monitoring", "automation"],
+        "context": {
+          "triggerSource": "chat-interface",
+          "originalMessage": "모든 웹 서버의 CPU 사용률을 확인하고 90% 이상인 서버를 재시작해줘"
+        }
+      }
+    },
+    {
+      "eventId": "550e8400-e29b-41d4-a716-446655440010",
+      "eventType": "WorkflowStepCompleted",
+      "timestamp": "2024-01-15T10:30:30Z",
+      "workflowId": "cpu-monitor-restart-v1",
+      "executionId": "660e8400-e29b-41d4-a716-446655440001",
+      "payload": {
+        "stepId": "analyze-intent",
+        "stepName": "의도 분석",
+        "stepType": "llm",
+        "stepIndex": 1,
+        "result": {
+          "action": "monitor_and_restart",
+          "target": "web_servers",
+          "confidence": 0.95,
+          "parameters": {
+            "metric": "cpu",
+            "threshold": 90
+          }
+        },
+        "duration": 1250,
+        "retryCount": 0
+      },
+      "metadata": {
+        "sessionId": "770e8400-e29b-41d4-a716-446655440002",
+        "userId": "admin",
+        "correlationId": "880e8400-e29b-41d4-a716-446655440003",
+        "source": "workflow-engine",
+        "version": "1.0.0",
+        "environment": "production",
+        "tags": ["step-completion", "llm"]
+      }
+    },
+    {
+      "eventId": "550e8400-e29b-41d4-a716-446655440020",
+      "eventType": "WorkflowCompleted",
+      "timestamp": "2024-01-15T10:32:05Z",
+      "workflowId": "cpu-monitor-restart-v1",
+      "executionId": "660e8400-e29b-41d4-a716-446655440001",
+      "payload": {
+        "result": {
+          "summary": "3대 서버 중 1대 재시작 완료",
+          "details": {
+            "checkedServers": ["web-server-01", "web-server-02", "web-server-03"],
+            "cpuUsage": [45.2, 92.0, 88.1],
+            "restartedServers": ["web-server-02"],
+            "affectedServices": ["nginx"],
+            "newCpuUsage": [45.2, 12.5, 88.1]
+          }
+        },
+        "duration": 125000,
+        "completedSteps": 5,
+        "failedSteps": 0,
+        "skippedSteps": 0,
+        "resourceUsage": {
+          "llmTokens": 245,
+          "mcpExecutions": 4,
+          "deviceOperations": 4,
+          "estimatedCost": 0.012
+        }
+      },
+      "metadata": {
+        "sessionId": "770e8400-e29b-41d4-a716-446655440002",
+        "userId": "admin",
+        "correlationId": "880e8400-e29b-41d4-a716-446655440003",
+        "source": "workflow-engine",
+        "version": "1.0.0",
+        "environment": "production",
+        "tags": ["workflow-completion", "success", "critical"]
+      }
+    }
+  ]
+}

@@ -1,0 +1,892 @@
+openapi: 3.0.3
+info:
+  title: Storage Service API
+  version: 1.0.0
+  description: 통합 데이터 관리 API (섹션 2.2 기반)
+  contact:
+    name: Backend Team - Core
+    email: backend-core@automation-system.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8001/api/v1
+    description: Development server
+  - url: http://storage-service:8001/api/v1
+    description: Internal service communication
+
+paths:
+  /storage/devices:
+    get:
+      summary: 장비 목록 조회
+      description: 등록된 장비들의 목록을 조회합니다.
+      operationId: getDevices
+      tags:
+        - Devices
+      parameters:
+        - name: groupId
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: 그룹 ID로 필터링
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, inactive, maintenance, online, offline, error]
+          description: 상태별 필터링
+          example: "active"
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [server, network, storage, iot]
+          description: 장비 타입별 필터링
+          example: "server"
+        - name: search
+          in: query
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+          description: 장비명 검색
+          example: "web-server"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 20
+          description: 페이지 크기
+          example: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: 시작 위치
+          example: 0
+        - name: sortBy
+          in: query
+          schema:
+            type: string
+            enum: [name, createdAt, updatedAt, status]
+            default: createdAt
+          description: 정렬 기준
+        - name: sortOrder
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+          description: 정렬 순서
+      responses:
+        '200':
+          description: 장비 목록 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceListResponse'
+              examples:
+                empty_list:
+                  summary: 빈 목록
+                  value:
+                    items: []
+                    total: 0
+                    limit: 20
+                    offset: 0
+                device_list:
+                  summary: 장비 목록
+                  value:
+                    items:
+                      - id: "550e8400-e29b-41d4-a716-446655440000"
+                        name: "web-server-01"
+                        type: "server"
+                        status: "active"
+                        groupId: "770e8400-e29b-41d4-a716-446655440001"
+                        metadata:
+                          ip: "192.168.1.100"
+                          os: "Ubuntu 22.04"
+                        createdAt: "2024-01-01T00:00:00Z"
+                        updatedAt: "2024-01-15T10:30:00Z"
+                    total: 1
+                    limit: 20
+                    offset: 0
+        '400':
+          description: 잘못된 요청 파라미터
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 인증 필요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    post:
+      summary: 장비 등록
+      description: 새로운 장비를 시스템에 등록합니다.
+      operationId: createDevice
+      tags:
+        - Devices
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceCreate'
+            examples:
+              server_device:
+                summary: 서버 장비 등록
+                value:
+                  name: "web-server-01"
+                  type: "server"
+                  groupId: "770e8400-e29b-41d4-a716-446655440001"
+                  metadata:
+                    ip: "192.168.1.100"
+                    os: "Ubuntu 22.04"
+                    description: "웹 서버 01번"
+              network_device:
+                summary: 네트워크 장비 등록
+                value:
+                  name: "switch-01"
+                  type: "network"
+                  metadata:
+                    ip: "192.168.1.1"
+                    model: "Cisco Catalyst 2960"
+      responses:
+        '201':
+          description: 장비 등록 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+              examples:
+                created_device:
+                  summary: 생성된 장비 정보
+                  value:
+                    id: "550e8400-e29b-41d4-a716-446655440000"
+                    name: "web-server-01"
+                    type: "server"
+                    status: "active"
+                    groupId: "770e8400-e29b-41d4-a716-446655440001"
+                    metadata:
+                      ip: "192.168.1.100"
+                      os: "Ubuntu 22.04"
+                      description: "웹 서버 01번"
+                    createdAt: "2024-01-15T10:30:00Z"
+                    updatedAt: "2024-01-15T10:30:00Z"
+        '400':
+          description: 잘못된 요청 데이터
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 인증 필요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: 중복된 장비명
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /storage/devices/{id}:
+    get:
+      summary: 장비 상세 조회
+      description: 특정 장비의 상세 정보를 조회합니다.
+      operationId: getDeviceById
+      tags:
+        - Devices
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: 장비 고유 ID
+          example: "550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        '200':
+          description: 장비 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+        '400':
+          description: 잘못된 ID 형식
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 인증 필요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: 장비를 찾을 수 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    put:
+      summary: 장비 정보 수정
+      description: 기존 장비의 정보를 수정합니다.
+      operationId: updateDevice
+      tags:
+        - Devices
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: 장비 고유 ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceUpdate'
+      responses:
+        '200':
+          description: 장비 수정 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+        '400':
+          description: 잘못된 요청 데이터
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 인증 필요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: 장비를 찾을 수 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      summary: 장비 삭제
+      description: 시스템에서 장비를 삭제합니다.
+      operationId: deleteDevice
+      tags:
+        - Devices
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: 장비 고유 ID
+      responses:
+        '204':
+          description: 장비 삭제 성공
+        '400':
+          description: 잘못된 ID 형식
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 인증 필요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: 장비를 찾을 수 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /storage/auth/authenticate:
+    post:
+      summary: 사용자 인증
+      description: 사용자 인증을 처리하고 사용자 정보를 반환합니다.
+      operationId: authenticateUser
+      tags:
+        - Authentication
+      security: []  # 인증 엔드포인트는 JWT 불필요
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                  minLength: 3
+                  maxLength: 50
+                  description: 사용자명
+                  example: "admin"
+                password:
+                  type: string
+                  minLength: 8
+                  description: 비밀번호
+                  example: "Admin123!@#"
+      responses:
+        '200':
+          description: 인증 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserInfo'
+        '401':
+          description: 인증 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalid_credentials:
+                  summary: 잘못된 자격증명
+                  value:
+                    error: "AUTHENTICATION_FAILED"
+                    message: "Invalid username or password"
+                    timestamp: "2024-01-15T10:30:00Z"
+                user_inactive:
+                  summary: 비활성 사용자
+                  value:
+                    error: "USER_INACTIVE"
+                    message: "User account is inactive"
+                    timestamp: "2024-01-15T10:30:00Z"
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /storage/auth/users/{userId}:
+    get:
+      summary: 사용자 정보 조회
+      description: 특정 사용자의 정보를 조회합니다.
+      operationId: getUserById
+      tags:
+        - Authentication
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: 사용자 고유 ID
+          example: "00000000-0000-0000-0000-000000000001"
+      responses:
+        '200':
+          description: 사용자 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserInfo'
+        '404':
+          description: 사용자를 찾을 수 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /storage/device-groups:
+    get:
+      summary: 장비 그룹 목록 조회
+      description: 등록된 장비 그룹들의 목록을 조회합니다.
+      operationId: getDeviceGroups
+      tags:
+        - Device Groups
+      parameters:
+        - name: parentId
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: 부모 그룹 ID로 필터링
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: 그룹 목록 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceGroupListResponse'
+        '400':
+          description: 잘못된 요청 파라미터
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 인증 필요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    post:
+      summary: 장비 그룹 생성
+      description: 새로운 장비 그룹을 생성합니다.
+      operationId: createDeviceGroup
+      tags:
+        - Device Groups
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceGroupCreate'
+      responses:
+        '201':
+          description: 그룹 생성 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceGroup'
+        '400':
+          description: 잘못된 요청 데이터
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 인증 필요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    Device:
+      type: object
+      required:
+        - id
+        - name
+        - type
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: 장비 고유 ID
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: 장비명
+          example: "web-server-01"
+        type:
+          type: string
+          enum: [server, network, storage, iot]
+          description: 장비 타입
+          example: "server"
+        status:
+          type: string
+          enum: [active, inactive, maintenance, online, offline, error]
+          description: 장비 상태
+          example: "active"
+        groupId:
+          type: string
+          format: uuid
+          description: 소속 그룹 ID
+          example: "770e8400-e29b-41d4-a716-446655440001"
+        connectionInfo:
+          $ref: '#/components/schemas/ConnectionInfo'
+        metadata:
+          type: object
+          additionalProperties: true
+          description: 장비별 추가 메타데이터
+          example:
+            location: "서버실 A"
+            rack: "R-01"
+            description: "웹 서버 01번"
+        tags:
+          type: array
+          items:
+            type: string
+          description: 장비 태그 목록
+          example: ["production", "web", "critical"]
+        createdAt:
+          type: string
+          format: date-time
+          description: 생성 시간
+          example: "2024-01-01T00:00:00Z"
+        updatedAt:
+          type: string
+          format: date-time
+          description: 수정 시간
+          example: "2024-01-15T10:30:00Z"
+
+    ConnectionInfo:
+      type: object
+      required:
+        - protocol
+        - host
+        - port
+      properties:
+        protocol:
+          type: string
+          enum: [ssh, telnet, http, https, snmp]
+          description: 연결 프로토콜
+          example: "ssh"
+        host:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: IP 주소 또는 호스트명
+          example: "192.168.1.100"
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          description: 접속 포트
+          example: 22
+        username:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: 접속 계정
+          example: "admin"
+        password:
+          type: string
+          format: password
+          description: 접속 비밀번호 (암호화 저장)
+          writeOnly: true
+        privateKey:
+          type: string
+          description: SSH 개인키 (SSH 프로토콜용)
+          writeOnly: true
+        timeout:
+          type: integer
+          minimum: 1
+          maximum: 300
+          default: 30
+          description: 연결 타임아웃 (초)
+        retryAttempts:
+          type: integer
+          minimum: 0
+          maximum: 10
+          default: 3
+          description: 재시도 횟수
+        enableSudo:
+          type: boolean
+          default: false
+          description: sudo 권한 필요 여부
+        sudoPassword:
+          type: string
+          format: password
+          description: sudo 비밀번호
+          writeOnly: true
+
+    DeviceCreate:
+      type: object
+      required:
+        - name
+        - type
+        - connectionInfo
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: 장비명
+          example: "web-server-01"
+        type:
+          type: string
+          enum: [server, network, storage, iot]
+          description: 장비 타입
+          example: "server"
+        groupId:
+          type: string
+          format: uuid
+          description: 소속 그룹 ID
+          example: "770e8400-e29b-41d4-a716-446655440001"
+        connectionInfo:
+          $ref: '#/components/schemas/ConnectionInfo'
+        metadata:
+          type: object
+          additionalProperties: true
+          description: 장비별 추가 메타데이터
+          example:
+            location: "서버실 A"
+            rack: "R-01"
+        tags:
+          type: array
+          items:
+            type: string
+          description: 장비 태그 목록
+          example: ["production", "web"]
+
+    DeviceUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: 장비명
+        status:
+          type: string
+          enum: [active, inactive, maintenance, online, offline, error]
+          description: 장비 상태
+        groupId:
+          type: string
+          format: uuid
+          description: 소속 그룹 ID
+        connectionInfo:
+          $ref: '#/components/schemas/ConnectionInfo'
+        metadata:
+          type: object
+          additionalProperties: true
+          description: 장비별 추가 메타데이터
+        tags:
+          type: array
+          items:
+            type: string
+          description: 장비 태그 목록
+
+    DeviceListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - limit
+        - offset
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Device'
+          description: 장비 목록
+        total:
+          type: integer
+          minimum: 0
+          description: 전체 아이템 수
+          example: 100
+        limit:
+          type: integer
+          minimum: 1
+          description: 페이지 크기
+          example: 20
+        offset:
+          type: integer
+          minimum: 0
+          description: 시작 위치
+          example: 0
+
+    DeviceGroup:
+      type: object
+      required:
+        - id
+        - name
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: 그룹 고유 ID
+          example: "770e8400-e29b-41d4-a716-446655440001"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: 그룹명
+          example: "Production Servers"
+        description:
+          type: string
+          maxLength: 500
+          description: 그룹 설명
+          example: "프로덕션 환경의 서버들"
+        parentId:
+          type: string
+          format: uuid
+          description: 부모 그룹 ID (계층적 구조)
+          example: "880e8400-e29b-41d4-a716-446655440002"
+        metadata:
+          type: object
+          additionalProperties: true
+          description: 그룹별 추가 메타데이터
+        createdAt:
+          type: string
+          format: date-time
+          description: 생성 시간
+        updatedAt:
+          type: string
+          format: date-time
+          description: 수정 시간
+
+    DeviceGroupCreate:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: 그룹명
+        description:
+          type: string
+          maxLength: 500
+          description: 그룹 설명
+        parentId:
+          type: string
+          format: uuid
+          description: 부모 그룹 ID
+        metadata:
+          type: object
+          additionalProperties: true
+          description: 그룹별 추가 메타데이터
+
+    DeviceGroupListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - limit
+        - offset
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeviceGroup'
+        total:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+        offset:
+          type: integer
+          minimum: 0
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+        - timestamp
+      properties:
+        error:
+          type: string
+          description: 오류 코드
+          example: "DEVICE_NOT_FOUND"
+        message:
+          type: string
+          description: 오류 메시지
+          example: "Device with ID '550e8400-e29b-41d4-a716-446655440000' not found"
+        timestamp:
+          type: string
+          format: date-time
+          description: 오류 발생 시간
+          example: "2024-01-15T10:30:00Z"
+        details:
+          type: object
+          additionalProperties: true
+          description: 추가 오류 상세 정보
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+security:
+  - bearerAuth: []
+    description: 장비 그룹 관리 API
+  - name: Authentication
+    description: 사용자 인증 API

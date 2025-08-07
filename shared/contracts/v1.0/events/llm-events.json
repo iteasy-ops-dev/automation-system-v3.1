@@ -1,0 +1,505 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LLMEvent",
+  "description": "LLM 요청 및 응답 이벤트 스키마",
+  "type": "object",
+  "required": ["eventId", "eventType", "timestamp"],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "이벤트 고유 ID",
+      "examples": ["550e8400-e29b-41d4-a716-446655440000"]
+    },
+    "eventType": {
+      "type": "string",
+      "enum": [
+        "LLMRequestStarted",
+        "LLMRequestCompleted",
+        "LLMRequestFailed",
+        "TokenLimitExceeded",
+        "ModelSwitched",
+        "ProviderHealthCheck",
+        "CacheHit",
+        "CacheMiss"
+      ],
+      "description": "이벤트 타입",
+      "examples": ["LLMRequestCompleted"]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "이벤트 발생 시간",
+      "examples": ["2024-01-15T10:30:00Z"]
+    },
+    "requestId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "LLM 요청 고유 ID",
+      "examples": ["660e8400-e29b-41d4-a716-446655440001"]
+    },
+    "payload": {
+      "type": "object",
+      "description": "이벤트별 페이로드",
+      "oneOf": [
+        {
+          "if": {
+            "properties": {
+              "eventType": {
+                "const": "LLMRequestStarted"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": ["openai", "anthropic", "google", "azure"],
+                "description": "LLM 프로바이더",
+                "examples": ["openai"]
+              },
+              "model": {
+                "type": "string",
+                "description": "사용된 모델",
+                "examples": ["gpt-4"]
+              },
+              "requestType": {
+                "type": "string",
+                "enum": ["chat", "completion", "embedding"],
+                "description": "요청 타입",
+                "examples": ["chat"]
+              },
+              "inputTokens": {
+                "type": "integer",
+                "description": "입력 토큰 수",
+                "examples": [120]
+              },
+              "maxTokens": {
+                "type": "integer",
+                "description": "최대 출력 토큰 수",
+                "examples": [1000]
+              },
+              "temperature": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 2,
+                "description": "생성 온도",
+                "examples": [0.7]
+              },
+              "stream": {
+                "type": "boolean",
+                "description": "스트리밍 여부",
+                "examples": [false]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "eventType": {
+                "const": "LLMRequestCompleted"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": ["openai", "anthropic", "google", "azure"],
+                "description": "LLM 프로바이더"
+              },
+              "model": {
+                "type": "string",
+                "description": "사용된 모델",
+                "examples": ["gpt-4"]
+              },
+              "requestType": {
+                "type": "string",
+                "enum": ["chat", "completion", "embedding"],
+                "description": "요청 타입"
+              },
+              "tokenUsage": {
+                "type": "object",
+                "required": ["promptTokens", "completionTokens", "totalTokens"],
+                "properties": {
+                  "promptTokens": {
+                    "type": "integer",
+                    "description": "입력 토큰 수",
+                    "examples": [120]
+                  },
+                  "completionTokens": {
+                    "type": "integer",
+                    "description": "출력 토큰 수",
+                    "examples": [85]
+                  },
+                  "totalTokens": {
+                    "type": "integer",
+                    "description": "총 토큰 수",
+                    "examples": [205]
+                  },
+                  "cost": {
+                    "type": "number",
+                    "description": "예상 비용 (USD)",
+                    "examples": [0.006]
+                  }
+                }
+              },
+              "duration": {
+                "type": "integer",
+                "description": "요청 처리 시간 (밀리초)",
+                "examples": [1250]
+              },
+              "finishReason": {
+                "type": "string",
+                "enum": ["stop", "length", "content_filter", "tool_calls"],
+                "description": "완료 이유",
+                "examples": ["stop"]
+              },
+              "responseLength": {
+                "type": "integer",
+                "description": "응답 길이 (문자 수)",
+                "examples": [342]
+              },
+              "cacheUsed": {
+                "type": "boolean",
+                "description": "캐시 사용 여부",
+                "examples": [false]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "eventType": {
+                "const": "LLMRequestFailed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": ["openai", "anthropic", "google", "azure"],
+                "description": "LLM 프로바이더"
+              },
+              "model": {
+                "type": "string",
+                "description": "사용하려던 모델"
+              },
+              "error": {
+                "type": "string",
+                "description": "오류 메시지",
+                "examples": ["Rate limit exceeded"]
+              },
+              "errorCode": {
+                "type": "string",
+                "description": "오류 코드",
+                "examples": ["RATE_LIMIT_EXCEEDED"]
+              },
+              "httpStatus": {
+                "type": "integer",
+                "description": "HTTP 상태 코드",
+                "examples": [429]
+              },
+              "duration": {
+                "type": "integer",
+                "description": "실패까지의 시간 (밀리초)"
+              },
+              "retryable": {
+                "type": "boolean",
+                "description": "재시도 가능 여부",
+                "examples": [true]
+              },
+              "retryAfter": {
+                "type": "integer",
+                "description": "재시도 권장 시간 (초)"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "eventType": {
+                "const": "TokenLimitExceeded"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "provider": {
+                "type": "string",
+                "description": "프로바이더"
+              },
+              "model": {
+                "type": "string",
+                "description": "모델"
+              },
+              "requestedTokens": {
+                "type": "integer",
+                "description": "요청된 토큰 수"
+              },
+              "limitType": {
+                "type": "string",
+                "enum": ["per_request", "per_minute", "per_hour", "per_day", "monthly"],
+                "description": "한도 타입",
+                "examples": ["per_minute"]
+              },
+              "currentUsage": {
+                "type": "integer",
+                "description": "현재 사용량"
+              },
+              "limit": {
+                "type": "integer",
+                "description": "설정된 한도"
+              },
+              "resetTime": {
+                "type": "string",
+                "format": "date-time",
+                "description": "한도 리셋 시간"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "eventType": {
+                "const": "ModelSwitched"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "originalProvider": {
+                "type": "string",
+                "description": "원래 프로바이더"
+              },
+              "originalModel": {
+                "type": "string",
+                "description": "원래 모델"
+              },
+              "newProvider": {
+                "type": "string",
+                "description": "변경된 프로바이더"
+              },
+              "newModel": {
+                "type": "string",
+                "description": "변경된 모델"
+              },
+              "reason": {
+                "type": "string",
+                "enum": ["rate_limit", "error", "cost_optimization", "performance", "availability"],
+                "description": "변경 이유",
+                "examples": ["rate_limit"]
+              },
+              "automatic": {
+                "type": "boolean",
+                "description": "자동 변경 여부",
+                "examples": [true]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "eventType": {
+                "const": "CacheHit"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "cacheKey": {
+                "type": "string",
+                "description": "캐시 키 해시"
+              },
+              "model": {
+                "type": "string",
+                "description": "모델"
+              },
+              "similarity": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "description": "유사도 점수",
+                "examples": [0.98]
+              },
+              "cacheAge": {
+                "type": "integer",
+                "description": "캐시 생성 후 경과 시간 (초)"
+              },
+              "savedTokens": {
+                "type": "integer",
+                "description": "절약된 토큰 수"
+              },
+              "savedCost": {
+                "type": "number",
+                "description": "절약된 비용 (USD)"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "eventType": {
+                "const": "ProviderHealthCheck"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "provider": {
+                "type": "string",
+                "description": "프로바이더"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["healthy", "degraded", "unhealthy"],
+                "description": "상태",
+                "examples": ["healthy"]
+              },
+              "responseTime": {
+                "type": "number",
+                "description": "응답 시간 (ms)"
+              },
+              "availability": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100,
+                "description": "가용성 (%)"
+              },
+              "errorRate": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100,
+                "description": "에러율 (%)"
+              },
+              "lastError": {
+                "type": "string",
+                "description": "마지막 오류 메시지"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "요청한 사용자 ID"
+        },
+        "sessionId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "대화 세션 ID"
+        },
+        "correlationId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "관련 작업 추적을 위한 ID"
+        },
+        "workflowExecutionId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "관련 워크플로우 실행 ID"
+        },
+        "source": {
+          "type": "string",
+          "description": "이벤트 발생 소스",
+          "examples": ["llm-service", "workflow-engine"]
+        },
+        "version": {
+          "type": "string",
+          "description": "이벤트 스키마 버전",
+          "examples": ["1.0.0"]
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "이벤트 태그",
+          "examples": [["chat", "intent-analysis"]]
+        },
+        "context": {
+          "type": "object",
+          "properties": {
+            "purpose": {
+              "type": "string",
+              "enum": ["intent_analysis", "summary_generation", "text_completion", "translation"],
+              "description": "사용 목적"
+            },
+            "priority": {
+              "type": "string",
+              "enum": ["low", "normal", "high", "urgent"],
+              "description": "우선순위"
+            }
+          }
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "eventId": "550e8400-e29b-41d4-a716-446655440000",
+      "eventType": "LLMRequestCompleted",
+      "timestamp": "2024-01-15T10:30:00Z",
+      "requestId": "660e8400-e29b-41d4-a716-446655440001",
+      "payload": {
+        "provider": "openai",
+        "model": "gpt-4",
+        "requestType": "chat",
+        "tokenUsage": {
+          "promptTokens": 120,
+          "completionTokens": 85,
+          "totalTokens": 205,
+          "cost": 0.006
+        },
+        "duration": 1250,
+        "finishReason": "stop",
+        "responseLength": 342,
+        "cacheUsed": false
+      },
+      "metadata": {
+        "userId": "admin",
+        "sessionId": "770e8400-e29b-41d4-a716-446655440002",
+        "correlationId": "880e8400-e29b-41d4-a716-446655440003",
+        "workflowExecutionId": "990e8400-e29b-41d4-a716-446655440004",
+        "source": "llm-service",
+        "version": "1.0.0",
+        "tags": ["chat", "intent-analysis"],
+        "context": {
+          "purpose": "intent_analysis",
+          "priority": "normal"
+        }
+      }
+    },
+    {
+      "eventId": "550e8400-e29b-41d4-a716-446655440010",
+      "eventType": "ModelSwitched",
+      "timestamp": "2024-01-15T10:35:00Z",
+      "requestId": "660e8400-e29b-41d4-a716-446655440011",
+      "payload": {
+        "originalProvider": "openai",
+        "originalModel": "gpt-4",
+        "newProvider": "anthropic",
+        "newModel": "claude-3-opus",
+        "reason": "rate_limit",
+        "automatic": true
+      },
+      "metadata": {
+        "correlationId": "880e8400-e29b-41d4-a716-446655440005",
+        "source": "llm-service",
+        "version": "1.0.0",
+        "tags": ["failover", "rate-limit"]
+      }
+    }
+  ]
+}

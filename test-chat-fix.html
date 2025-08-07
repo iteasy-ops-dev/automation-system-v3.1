@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat API 테스트</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 20px auto; padding: 20px; }
+        .chat-container { border: 1px solid #ddd; height: 400px; overflow-y: auto; padding: 10px; margin: 10px 0; background: #f9f9f9; }
+        .message { margin: 10px 0; padding: 10px; border-radius: 8px; }
+        .user { background: #007bff; color: white; margin-left: 50px; }
+        .assistant { background: #e9ecef; margin-right: 50px; }
+        .error { background: #dc3545; color: white; }
+        input { width: 70%; padding: 10px; }
+        button { padding: 10px 20px; margin-left: 10px; }
+        .status { margin: 10px 0; font-weight: bold; }
+        .success { color: green; }
+        .error-status { color: red; }
+        .debug { background: #f8f9fa; border: 1px solid #dee2e6; padding: 10px; margin: 10px 0; font-family: monospace; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <h1>🔥 Chat API 수정 테스트</h1>
+    
+    <div id="status" class="status">상태: 준비됨</div>
+    
+    <div id="chatContainer" class="chat-container">
+        <div class="message assistant">안녕하세요! 메시지를 입력해보세요.</div>
+    </div>
+    
+    <input type="text" id="messageInput" placeholder="메시지를 입력하세요..." onkeypress="handleKeyPress(event)">
+    <button onclick="sendMessage()">전송</button>
+    <button onclick="clearChat()">초기화</button>
+    <button onclick="testDirectAPI()">직접 API 테스트</button>
+    
+    <h3>테스트 현황</h3>
+    <ul>
+        <li>✅ 백엔드 API: 정상 작동 (/api/v1/workflows/chat)</li>
+        <li>🔥 프론트엔드 수정: ChatContainer.tsx 응답 처리 로직 추가</li>
+        <li>🧪 현재 테스트: UI에 AI 응답이 표시되는지 확인</li>
+    </ul>
+
+    <div id="debugInfo" class="debug" style="display: none;">
+        <h4>디버그 정보</h4>
+        <div id="debugContent"></div>
+    </div>
+
+    <script>
+        let sessionId = 'test-' + Date.now();
+        let authToken = null;
+
+        // 페이지 로드 시 자동 로그인
+        window.onload = function() {
+            getAuthToken();
+        };
+
+        // 로그인하여 토큰 획득
+        async function getAuthToken() {
+            try {
+                updateStatus('로그인 중...', 'success');
+                const response = await fetch('/api/v1/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: 'admin',
+                        password: 'Admin123!@#'
+                    })
+                });
+                
+                const data = await response.json();
+                authToken = data.accessToken;
+                updateStatus('로그인 성공 ✅', 'success');
+                return true;
+            } catch (error) {
+                updateStatus('로그인 실패: ' + error.message, 'error-status');
+                return false;
+            }
+        }
+
+        // 메시지 전송
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+            
+            if (!message) return;
+            
+            if (!authToken) {
+                await getAuthToken();
+                if (!authToken) return;
+            }
+
+            // 사용자 메시지 표시
+            addMessage('user', message);
+            input.value = '';
+            updateStatus('AI 응답 대기 중...', 'success');
+
+            try {
+                const response = await fetch('/api/v1/workflows/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${authToken}`
+                    },
+                    body: JSON.stringify({
+                        sessionId: sessionId,
+                        message: message
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                
+                // 디버그 정보 표시
+                showDebugInfo(data);
+                
+                // 🔥 핵심 테스트: API 응답에 message 필드가 있는지 확인
+                if (data.message) {
+                    addMessage('assistant', data.message);
+                    updateStatus(`✅ 성공! AI 응답 받음 (${data.type || 'unknown'})`, 'success');
+                } else {
+                    addMessage('error', '⚠️ API 응답에 message 필드가 없습니다.');
+                    updateStatus('❌ 응답 형식 오류', 'error-status');
+                }
+
+            } catch (error) {
+                addMessage('error', '❌ 오류: ' + error.message);
+                updateStatus('❌ 전송 실패: ' + error.message, 'error-status');
+            }
+        }
+
+        // 직접 API 테스트
+        async function testDirectAPI() {
+            if (!authToken) {
+                await getAuthToken();
+                if (!authToken) return;
+            }
+
+            updateStatus('직접 API 테스트 중...', 'success');
+
+            try {
+                const response = await fetch('/api/v1/workflows/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${authToken}`
+                    },
+                    body: JSON.stringify({
+                        sessionId: sessionId,
+                        message: '테스트 메시지입니다'
+                    })
+                });
+
+                const data = await response.json();
+                
+                // 결과 분석
+                console.log('🔍 Direct API Test Result:', data);
+                showDebugInfo(data);
+                
+                const hasMessage = !!data.message;
+                const messageContent = data.message || 'N/A';
+                
+                addMessage('assistant', `📊 API 테스트 결과:
+• Status: ${response.status}
+• Message 필드 존재: ${hasMessage ? '✅ YES' : '❌ NO'}
+• Message 내용: ${messageContent}
+• Type: ${data.type || 'N/A'}
+• ExecutionId: ${data.executionId || 'N/A'}`);
+
+                updateStatus(hasMessage ? '✅ API 테스트 성공' : '❌ Message 필드 없음', hasMessage ? 'success' : 'error-status');
+
+            } catch (error) {
+                addMessage('error', '❌ API 테스트 실패: ' + error.message);
+                updateStatus('❌ API 테스트 실패', 'error-status');
+            }
+        }
+
+        // 메시지 추가
+        function addMessage(role, content) {
+            const container = document.getElementById('chatContainer');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${role}`;
+            messageDiv.innerHTML = content.replace(/\n/g, '<br>');
+            container.appendChild(messageDiv);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        // 상태 업데이트
+        function updateStatus(message, className) {
+            const status = document.getElementById('status');
+            status.textContent = `상태: ${message}`;
+            status.className = `status ${className}`;
+        }
+
+        // 디버그 정보 표시
+        function showDebugInfo(data) {
+            const debugDiv = document.getElementById('debugInfo');
+            const debugContent = document.getElementById('debugContent');
+            
+            debugContent.innerHTML = `
+                <strong>Raw API Response:</strong><br>
+                <pre>${JSON.stringify(data, null, 2)}</pre>
+            `;
+            
+            debugDiv.style.display = 'block';
+        }
+
+        // 채팅 초기화
+        function clearChat() {
+            const container = document.getElementById('chatContainer');
+            container.innerHTML = '<div class="message assistant">안녕하세요! 메시지를 입력해보세요.</div>';
+            
+            const debugDiv = document.getElementById('debugInfo');
+            debugDiv.style.display = 'none';
+            
+            updateStatus('채팅 초기화됨', 'success');
+        }
+
+        // 엔터키 처리
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+    </script>
+</body>
+</html>

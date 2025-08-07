@@ -1,0 +1,281 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Workflow {
+  id          String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name        String              @db.VarChar(100)
+  description String?
+  definition  Json
+  version     Int                 @default(1)
+  status      String              @default("active") @db.VarChar(20)
+  tags        String[]            @default([])
+  createdBy   String?             @map("created_by") @db.Uuid
+  createdAt   DateTime?           @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt   DateTime?           @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+  executions  WorkflowExecution[]
+  users       users?              @relation(fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([name, version], map: "unique_workflow_name_version")
+  @@index([createdBy], map: "idx_workflows_created_by")
+  @@index([status], map: "idx_workflows_status")
+  @@map("workflows")
+}
+
+model WorkflowExecution {
+  id           String                  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  workflowId   String                  @map("workflow_id") @db.Uuid
+  sessionId    String?                 @map("session_id") @db.Uuid
+  status       String                  @default("pending") @db.VarChar(20)
+  inputData    Json?                   @map("input_data")
+  outputData   Json?                   @map("output_data")
+  errorDetails Json?                   @map("error_details")
+  startedAt    DateTime?               @default(now()) @map("started_at") @db.Timestamp(6)
+  completedAt  DateTime?               @map("completed_at") @db.Timestamp(6)
+  durationMs   Int?                    @map("duration_ms")
+  executedBy   String?                 @map("executed_by") @db.Uuid
+  steps        WorkflowExecutionStep[]
+  users        users?                  @relation(fields: [executedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  workflow     Workflow                @relation(fields: [workflowId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([startedAt], map: "idx_workflow_executions_started_at")
+  @@index([status], map: "idx_workflow_executions_status")
+  @@index([workflowId], map: "idx_workflow_executions_workflow_id")
+  @@map("workflow_executions")
+}
+
+model WorkflowExecutionStep {
+  id           String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  executionId  String            @map("execution_id") @db.Uuid
+  stepId       String            @map("step_id") @db.VarChar(100)
+  stepName     String            @map("step_name") @db.VarChar(200)
+  stepType     String            @map("step_type") @db.VarChar(50)
+  status       String            @db.VarChar(20)
+  inputData    Json?             @map("input_data")
+  outputData   Json?             @map("output_data")
+  errorDetails Json?             @map("error_details")
+  startedAt    DateTime?         @map("started_at") @db.Timestamp(6)
+  completedAt  DateTime?         @map("completed_at") @db.Timestamp(6)
+  durationMs   Int?              @map("duration_ms")
+  retryCount   Int?              @default(0) @map("retry_count")
+  execution    WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([executionId], map: "idx_workflow_execution_steps_execution_id")
+  @@map("workflow_execution_steps")
+}
+
+model audit_logs {
+  id            String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  action        String    @db.VarChar(100)
+  resource_type String    @db.VarChar(50)
+  resource_id   String?   @db.Uuid
+  user_id       String?   @db.Uuid
+  ip_address    String?   @db.Inet
+  user_agent    String?
+  details       Json?
+  created_at    DateTime? @default(now()) @db.Timestamp(6)
+  users         users?    @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([created_at], map: "idx_audit_logs_created_at")
+  @@index([resource_type], map: "idx_audit_logs_resource_type")
+  @@index([user_id], map: "idx_audit_logs_user_id")
+}
+
+model device_groups {
+  id                  String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name                String          @db.VarChar(100)
+  description         String?         @db.VarChar(500)
+  parent_id           String?         @db.Uuid
+  metadata            Json?           @default("{}")
+  created_at          DateTime?       @default(now()) @db.Timestamp(6)
+  updated_at          DateTime?       @default(now()) @db.Timestamp(6)
+  device_groups       device_groups?  @relation("device_groupsTodevice_groups", fields: [parent_id], references: [id], onUpdate: NoAction)
+  other_device_groups device_groups[] @relation("device_groupsTodevice_groups")
+  devices             devices[]
+
+  @@unique([name, parent_id], map: "unique_group_name_per_parent")
+}
+
+model device_status_history {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  device_id       String    @db.Uuid
+  previous_status String?   @db.VarChar(20)
+  current_status  String    @db.VarChar(20)
+  reason          String?
+  changed_by      String?   @db.Uuid
+  changed_at      DateTime? @default(now()) @db.Timestamp(6)
+  users           users?    @relation(fields: [changed_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  devices         devices   @relation(fields: [device_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model devices {
+  id                    String                  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name                  String                  @unique(map: "unique_device_name") @db.VarChar(100)
+  type                  String                  @db.VarChar(20)
+  status                String                  @default("active") @db.VarChar(20)
+  group_id              String?                 @db.Uuid
+  metadata              Json?                   @default("{}")
+  tags                  String[]                @default([])
+  created_at            DateTime?               @default(now()) @db.Timestamp(6)
+  updated_at            DateTime?               @default(now()) @db.Timestamp(6)
+  device_status_history device_status_history[]
+  device_groups         device_groups?          @relation(fields: [group_id], references: [id], onUpdate: NoAction)
+
+  @@index([group_id], map: "idx_devices_group_id")
+  @@index([name], map: "idx_devices_name")
+  @@index([status], map: "idx_devices_status")
+  @@index([type], map: "idx_devices_type")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model llm_providers {
+  id            String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name          String         @unique @db.VarChar(50)
+  provider_type String         @db.VarChar(50)
+  api_endpoint  String?        @db.VarChar(500)
+  api_key_hash  String?        @db.VarChar(255)
+  models        Json?          @default("[]")
+  rate_limits   Json?          @default("{}")
+  status        String         @default("active") @db.VarChar(20)
+  created_at    DateTime?      @default(now()) @db.Timestamp(6)
+  updated_at    DateTime?      @default(now()) @db.Timestamp(6)
+  llm_requests  llm_requests[]
+
+  @@index([status], map: "idx_llm_providers_status")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model llm_requests {
+  id                String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  provider_id       String        @db.Uuid
+  model_name        String        @db.VarChar(100)
+  request_type      String        @db.VarChar(50)
+  prompt_tokens     Int?
+  completion_tokens Int?
+  total_tokens      Int?
+  cost_estimate     Decimal?      @db.Decimal(10, 6)
+  response_time_ms  Int?
+  status            String        @db.VarChar(20)
+  error_message     String?
+  requested_by      String?       @db.Uuid
+  created_at        DateTime?     @default(now()) @db.Timestamp(6)
+  llm_providers     llm_providers @relation(fields: [provider_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users             users?        @relation(fields: [requested_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([created_at], map: "idx_llm_requests_created_at")
+  @@index([provider_id], map: "idx_llm_requests_provider_id")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model mcp_executions {
+  id               String      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  server_id        String      @db.Uuid
+  tool_name        String      @db.VarChar(100)
+  execution_params Json?
+  status           String      @db.VarChar(20)
+  result           Json?
+  error_message    String?
+  started_at       DateTime?   @default(now()) @db.Timestamp(6)
+  completed_at     DateTime?   @db.Timestamp(6)
+  duration_ms      Int?
+  executed_by      String?     @db.Uuid
+  users            users?      @relation(fields: [executed_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  mcp_servers      mcp_servers @relation(fields: [server_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([server_id], map: "idx_mcp_executions_server_id")
+  @@index([started_at], map: "idx_mcp_executions_started_at")
+  @@index([status], map: "idx_mcp_executions_status")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model mcp_servers {
+  id                String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name              String           @unique @db.VarChar(100)
+  description       String?
+  server_type       String           @db.VarChar(50)
+  endpoint_url      String           @db.VarChar(500)
+  connection_config Json?            @default("{}")
+  status            String           @default("inactive") @db.VarChar(20)
+  version           String?          @db.VarChar(20)
+  capabilities      Json?            @default("[]")
+  last_heartbeat    DateTime?        @db.Timestamp(6)
+  created_at        DateTime?        @default(now()) @db.Timestamp(6)
+  updated_at        DateTime?        @default(now()) @db.Timestamp(6)
+  mcp_executions    mcp_executions[]
+  mcp_tools         mcp_tools[]
+
+  @@index([server_type], map: "idx_mcp_servers_server_type")
+  @@index([status], map: "idx_mcp_servers_status")
+}
+
+model mcp_tools {
+  id           String      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  server_id    String      @db.Uuid
+  name         String      @db.VarChar(100)
+  description  String?
+  version      String?     @db.VarChar(20)
+  schema       Json?
+  capabilities Json?       @default("[]")
+  is_enabled   Boolean?    @default(true)
+  created_at   DateTime?   @default(now()) @db.Timestamp(6)
+  updated_at   DateTime?   @default(now()) @db.Timestamp(6)
+  mcp_servers  mcp_servers @relation(fields: [server_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([server_id, name], map: "unique_tool_per_server")
+  @@index([name], map: "idx_mcp_tools_name")
+  @@index([server_id], map: "idx_mcp_tools_server_id")
+}
+
+model system_settings {
+  key          String    @id @db.VarChar(100)
+  value        Json
+  description  String?
+  category     String?   @db.VarChar(50)
+  is_encrypted Boolean?  @default(false)
+  updated_by   String?   @db.Uuid
+  updated_at   DateTime? @default(now()) @db.Timestamp(6)
+  users        users?    @relation(fields: [updated_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model user_sessions {
+  id            String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id       String    @db.Uuid
+  refresh_token String    @db.VarChar(500)
+  expires_at    DateTime  @db.Timestamp(6)
+  ip_address    String?   @db.Inet
+  user_agent    String?
+  created_at    DateTime? @default(now()) @db.Timestamp(6)
+  users         users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model users {
+  id                    String                  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  username              String                  @unique @db.Citext
+  email                 String                  @unique @db.Citext
+  password_hash         String                  @db.VarChar(255)
+  full_name             String?                 @db.VarChar(100)
+  role                  String                  @default("user") @db.VarChar(50)
+  status                String                  @default("active") @db.VarChar(20)
+  last_login_at         DateTime?               @db.Timestamp(6)
+  password_changed_at   DateTime?               @default(now()) @db.Timestamp(6)
+  created_at            DateTime?               @default(now()) @db.Timestamp(6)
+  updated_at            DateTime?               @default(now()) @db.Timestamp(6)
+  audit_logs            audit_logs[]
+  device_status_history device_status_history[]
+  llm_requests          llm_requests[]
+  mcp_executions        mcp_executions[]
+  system_settings       system_settings[]
+  user_sessions         user_sessions[]
+  workflow_executions   WorkflowExecution[]
+  workflows             Workflow[]
+
+  @@index([email], map: "idx_users_email")
+  @@index([username], map: "idx_users_username")
+}
