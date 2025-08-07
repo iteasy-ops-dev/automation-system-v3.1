@@ -197,6 +197,84 @@ class LLMServiceClient extends ServiceClient {
     }
   }
 
+  // 🎯 워크플로우 선택을 위한 LLM 분석 (NEW)
+  async analyzeWorkflowSelection(selectionData) {
+    try {
+      const startTime = Date.now();
+      logger.info(`🎯 LLM 워크플로우 선택 분석 시작`);
+      
+      const response = await this.client.post('/api/v1/llm/chat', {
+        messages: [
+          {
+            role: 'system',
+            content: `당신은 IT 자동화 워크플로우 선택 전문가입니다. 주어진 정보를 분석하여 가장 적절한 워크플로우를 선택하고 반드시 JSON 형식으로만 응답하세요:
+
+{
+  "selectedWorkflowId": "선택한_워크플로우_ID",
+  "confidence": 0.95,
+  "reasoning": "선택 이유에 대한 상세 설명",
+  "alternativeOptions": ["대안_워크플로우_ID1", "대안_워크플로우_ID2"],
+  "expectedOutcome": "예상되는 실행 결과"
+}
+
+만약 적절한 워크플로우가 없다면:
+{
+  "selectedWorkflowId": null,
+  "confidence": 0.0,
+  "reasoning": "적절한 워크플로우가 없는 이유",
+  "suggestedAction": "대안 제안"
+}
+
+선택 기준:
+1. 사용자 의도와 워크플로우 기능의 정확한 매칭
+2. 예상 성공률과 안정성
+3. 워크플로우의 복잡도와 작업 범위의 적절성`
+          },
+          {
+            role: 'user',
+            content: selectionData.prompt
+          }
+        ],
+        temperature: 0.2,
+        maxTokens: 500,
+        model: 'gpt-3.5-turbo'
+      });
+
+      const duration = Date.now() - startTime;
+      const content = response.data.choices[0].message.content.trim();
+      
+      try {
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          logger.info(`✅ 워크플로우 선택 분석 완료 (${duration}ms):`, {
+            selectedId: parsed.selectedWorkflowId,
+            confidence: parsed.confidence
+          });
+          return parsed;
+        } else {
+          throw new Error('No JSON found in response');
+        }
+      } catch (parseError) {
+        logger.warn(`⚠️ 워크플로우 선택 JSON 파싱 실패: "${content}"`);
+        return {
+          selectedWorkflowId: null,
+          confidence: 0.0,
+          reasoning: 'LLM 응답 파싱 실패',
+          suggestedAction: '규칙 기반 선택 사용'
+        };
+      }
+    } catch (error) {
+      logger.error('❌ LLM 워크플로우 선택 분석 실패:', error);
+      return {
+        selectedWorkflowId: null,
+        confidence: 0.0,
+        reasoning: `LLM 서비스 오류: ${error.message}`,
+        suggestedAction: '규칙 기반 선택 사용'
+      };
+    }
+  }
+
   // 결과 기반 자연어 응답 생성
   async generateResponse(message, results, intent) {
     try {

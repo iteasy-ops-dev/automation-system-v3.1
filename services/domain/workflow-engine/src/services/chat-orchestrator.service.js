@@ -5,16 +5,9 @@ const logger = require('../utils/logger');
 const workflowService = require('./workflow.service');
 const redisService = require('./redis.service');
 const { llmClient, mcpClient, deviceClient } = require('./external.service');
-// TASK-WF-002: 실제 n8n 서비스로 교체
 const n8nEngineService = require('./n8n-engine.service');
+const workflowSelectorService = require('./workflow-selector/workflow-selector.service');
 const { v4: uuidv4 } = require('uuid');
-
-// 🏗️ 워크플로우 템플릿 시스템 import
-const { 
-  selectWorkflowTemplate, 
-  getDefaultTemplate, 
-  createExecutionPlan 
-} = require('../templates/workflow-templates');
 
 /**
  * 🎯 ChatOrchestrator - 완전한 워크플로우 오케스트레이션 엔진
@@ -122,24 +115,28 @@ class ChatOrchestrator {
     return hasKeyword && isLongEnough && hasActionIntent;
   }
 
-  // 🚀 인프라 워크플로우 처리 (핵심 메서드)
+  // 🚀 인프라 워크플로우 처리 (개선된 버전 - 동적 생성 중단)
   async handleInfrastructureWorkflow(sessionId, message, context, startTime) {
-    const executionId = `workflow_${uuidv4()}`;
+    const executionId = uuidv4();
     
-    logger.info(`🚀 인프라 워크플로우 시작 [${executionId}]: "${message}"`);
+    logger.info(`🚀 개선된 인프라 워크플로우 시작 [${executionId}]: "${message}"`);
 
     try {
       // 1. LLM 의도 분석
       const intent = await this.analyzeIntentWithLLM(message, context);
       logger.info(`🧠 의도 분석 완료: ${intent.intent}`, intent);
 
-      // 2. 워크플로우 템플릿 선택
-      const workflowTemplate = selectWorkflowTemplate(intent);
+      // 2. 기존 활성화된 워크플로우 선택 (동적 생성 대신)
+      const selectedWorkflow = await workflowSelectorService.selectWorkflowForIntent(intent, {
+        sessionId,
+        originalMessage: message,
+        context
+      });
       
-      if (!workflowTemplate) {
+      if (!selectedWorkflow) {
         const response = await this.llmClient.generateErrorResponse(
           message, 
-          new Error('해당 작업을 수행할 수 있는 워크플로우가 아직 준비되지 않았습니다.')
+          new Error('현재 요청을 처리할 수 있는 활성화된 워크플로우가 없습니다.')
         );
 
         return {
@@ -148,22 +145,24 @@ class ChatOrchestrator {
           status: 'no_workflow',
           response,
           intent,
-          duration: Date.now() - startTime
+          duration: Date.now() - startTime,
+          reason: 'no_active_workflow_found'
         };
       }
 
-      logger.info(`📋 워크플로우 선택됨: "${workflowTemplate.name}" (신뢰도: ${workflowTemplate.confidence})`);
+      logger.info(`📋 워크플로우 선택됨: "${selectedWorkflow.name}" (ID: ${selectedWorkflow.id})`);
+      logger.info(`🎯 선택 신뢰도: ${selectedWorkflow.selectionMetadata?.confidence || 'unknown'}`);
 
-      // 3. n8n 우선 실행 → MCP 폴백
+      // 3. 선택된 기존 워크플로우 실행 (n8n 우선 → MCP 폴백)
       try {
-        return await this.executeN8nWorkflow(executionId, workflowTemplate, intent, sessionId, message, startTime);
-      } catch (n8nError) {
-        logger.warn(`⚠️ n8n 실행 실패, MCP 폴백 시도:`, n8nError);
-        return await this.executeMCPWorkflow(executionId, workflowTemplate, intent, sessionId, message, startTime);
+        return await this.executeSelectedWorkflow(executionId, selectedWorkflow, intent, sessionId, message, startTime);
+      } catch (workflowError) {
+        logger.warn(`⚠️ 선택된 워크플로우 실행 실패, MCP 폴백 시도:`, workflowError);
+        return await this.executeMCPWorkflow(executionId, selectedWorkflow, intent, sessionId, message, startTime);
       }
 
     } catch (error) {
-      logger.error(`💥 인프라 워크플로우 실행 실패 [${executionId}]:`, error);
+      logger.error(`💥 개선된 인프라 워크플로우 실행 실패 [${executionId}]:`, error);
       return await this.createErrorResponse(sessionId, message, error, startTime, executionId);
     }
   }
@@ -225,29 +224,38 @@ class ChatOrchestrator {
     };
   }
 
-  // 🔗 n8n 워크플로우 실행
-  async executeN8nWorkflow(executionId, workflowTemplate, intent, sessionId, message, startTime) {
-    logger.info(`🔗 n8n 워크플로우 실행 시작 [${executionId}]`);
+  // 🔗 선택된 기존 워크플로우 실행 (NEW METHOD - Prisma 우회)
+  async executeSelectedWorkflow(executionId, selectedWorkflow, intent, sessionId, message, startTime) {
+    logger.info(`🔗 선택된 워크플로우 실행 시작 [${executionId}]: ${selectedWorkflow.name}`);
 
     try {
-      // n8n에서 워크플로우 생성
-      const n8nWorkflow = await this.n8nEngine.createWorkflow({
-        ...workflowTemplate,
-        name: `${workflowTemplate.name}-${executionId}`,
-        executionContext: {
-          executionId,
-          sessionId,
-          intent,
-          timestamp: new Date()
+      // 워크플로우가 활성화되어 있는지 확인
+      if (!selectedWorkflow.active) {
+        logger.warn(`⚠️ 선택된 워크플로우가 비활성화 상태: ${selectedWorkflow.name}`);
+        
+        // 활성화 시도
+        try {
+          await n8nEngineService.activateWorkflow(selectedWorkflow.id);
+          logger.info(`✅ 워크플로우 활성화 완료: ${selectedWorkflow.id}`);
+        } catch (activateError) {
+          logger.error(`❌ 워크플로우 활성화 실패: ${activateError.message}`);
+          throw new Error(`워크플로우 활성화 실패: ${activateError.message}`);
         }
-      });
+      }
 
-      // n8n 워크플로우 실행
-      const n8nResult = await this.n8nEngine.executeWorkflow(n8nWorkflow.id, {
+      // 실행 데이터 준비 (워크플로우 내부에서 사용할 데이터)
+      const executionData = {
         intent: intent,
-        entities: intent.entities,
-        sessionId: sessionId
-      });
+        entities: intent.entities || {},
+        sessionId: sessionId,
+        originalMessage: message,
+        executionId: executionId,
+        timestamp: new Date().toISOString(),
+        selectionMetadata: selectedWorkflow.selectionMetadata
+      };
+
+      // n8n 워크플로우 실행 (Webhook 방식)
+      const n8nResult = await n8nEngineService.executeWorkflow(selectedWorkflow.id, executionData);
 
       // 실행 결과 처리
       const processedResults = this.processN8nResults(n8nResult);
@@ -255,49 +263,53 @@ class ChatOrchestrator {
       // LLM으로 응답 생성
       const response = await this.llmClient.generateResponse(message, processedResults.results, intent);
 
-      // 실행 기록 저장
+      // 실행 기록 저장 (이제 n8n ID 지원)
       await this.saveExecutionRecord({
         executionId,
-        workflowId: n8nWorkflow.id,
+        workflowId: selectedWorkflow.id, // n8n ID (이제 VARCHAR 지원)
         n8nExecutionId: n8nResult.id,
         sessionId,
         intent,
-        templateName: workflowTemplate.name,
-        status: processedResults.summary.overallSuccess ? 'completed' : 'partial_success',
+        workflowName: selectedWorkflow.name,
+        status: processedResults.summary?.overallSuccess ? 'completed' : 'partial_success',
         startedAt: new Date(startTime),
         completedAt: new Date(),
         response,
         results: processedResults.results,
-        duration: Date.now() - startTime
+        duration: Date.now() - startTime,
+        selectionMethod: selectedWorkflow.selectionMetadata?.selectedBy,
+        selectionConfidence: selectedWorkflow.selectionMetadata?.confidence
       });
 
       return {
         executionId,
-        workflowId: null, // 템플릿 기반이므로 데이터베이스 조회 불필요
+        workflowId: selectedWorkflow.id,
         n8nExecutionId: n8nResult.id,
-        status: processedResults.summary.overallSuccess ? 'completed' : 'partial_success',
+        status: processedResults.summary?.overallSuccess ? 'completed' : 'partial_success',
         response,
         intent,
         results: processedResults,
-        duration: Date.now() - startTime
+        duration: Date.now() - startTime,
+        workflowName: selectedWorkflow.name,
+        selectionMetadata: selectedWorkflow.selectionMetadata
       };
 
-    } catch (n8nError) {
-      logger.error(`❌ n8n 워크플로우 실행 실패:`, n8nError);
-      throw n8nError; // MCP 폴백으로 전달
+    } catch (workflowError) {
+      logger.error(`❌ 선택된 워크플로우 실행 실패:`, workflowError);
+      throw workflowError; // MCP 폴백으로 전달
     }
   }
 
-  // 🔧 MCP 워크플로우 실행 (완전한 실제 구현 - TASK-WF-003)
-  async executeMCPWorkflow(executionId, workflowTemplate, intent, sessionId, message, startTime) {
-    logger.info(`🔧 실제 MCP 워크플로우 실행 시작 [${executionId}]: ${workflowTemplate.name}`);
+  // 🔧 MCP 워크플로우 실행 (개선된 폴백)
+  async executeMCPWorkflow(executionId, selectedWorkflow, intent, sessionId, message, startTime) {
+    logger.info(`🔧 MCP 워크플로우 실행 시작 [${executionId}]: ${selectedWorkflow.name || 'Unknown'}`);
 
     try {
       // 1. 실행 컨텍스트 설정
       const executionContext = {
         executionId,
         sessionId,
-        workflow: workflowTemplate,
+        workflow: selectedWorkflow,
         intent,
         startTime: Date.now(),
         steps: []
@@ -307,7 +319,7 @@ class ChatOrchestrator {
       this.activeExecutions.set(executionId, executionContext);
 
       // 2. 🚀 실제 MCP Service를 통한 워크플로우 실행
-      const workflowResults = await this.executeRealMCPWorkflowSteps(intent, workflowTemplate, sessionId);
+      const workflowResults = await this.executeRealMCPWorkflowSteps(intent, selectedWorkflow, sessionId);
 
       // 3. LLM으로 결과 종합 응답 생성
       const response = await this.llmClient.generateResponse(message, workflowResults, intent);
@@ -315,17 +327,19 @@ class ChatOrchestrator {
       // 4. 실행 기록 저장
       await this.saveExecutionRecord({
         executionId,
-        workflowId: null, // 템플릿 기반이므로 null
+        workflowId: selectedWorkflow.id,
         sessionId,
         intent,
-        templateName: workflowTemplate.name,
+        workflowName: selectedWorkflow.name,
         status: workflowResults.status || 'completed',
         startedAt: new Date(startTime),
         completedAt: new Date(),
         response,
         results: workflowResults,
         duration: Date.now() - startTime,
-        fallback: 'real_mcp_execution'
+        fallback: 'mcp_execution',
+        selectionMethod: selectedWorkflow.selectionMetadata?.selectedBy,
+        selectionConfidence: selectedWorkflow.selectionMetadata?.confidence
       });
 
       // 활성 실행에서 제거
@@ -333,17 +347,19 @@ class ChatOrchestrator {
 
       return {
         executionId,
-        workflowId: null,
+        workflowId: selectedWorkflow.id,
         status: workflowResults.status || 'completed',
         response,
         intent,
         results: workflowResults,
         duration: Date.now() - startTime,
-        engine: 'real_mcp'
+        engine: 'mcp_fallback',
+        workflowName: selectedWorkflow.name,
+        selectionMetadata: selectedWorkflow.selectionMetadata
       };
 
     } catch (mcpError) {
-      logger.error(`❌ 실제 MCP 워크플로우 실행 실패 [${executionId}]:`, mcpError);
+      logger.error(`❌ MCP 워크플로우 실행 실패 [${executionId}]:`, mcpError);
       
       this.activeExecutions.delete(executionId);
 
@@ -354,13 +370,14 @@ class ChatOrchestrator {
 
       return {
         executionId,
-        workflowId: null,
+        workflowId: selectedWorkflow.id,
         status: 'failed',
         response: errorResponse,
         intent,
         error: mcpError.message,
         duration: Date.now() - startTime,
-        engine: 'real_mcp'
+        engine: 'mcp_fallback',
+        workflowName: selectedWorkflow.name
       };
     }
   }

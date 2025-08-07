@@ -14,7 +14,7 @@ class WorkflowService {
     try {
       const workflow = await this.prisma.executeQuery(
         async (prisma) => {
-          return await prisma.workflow.create({
+          return await prisma.Workflow.create({
           data: {
           id: uuidv4(),
             name: data.name,
@@ -50,7 +50,7 @@ class WorkflowService {
       if (!definition) {
         const workflow = await this.prisma.executeQuery(
           async (prisma) => {
-            return await prisma.workflow.findUnique({
+            return await prisma.Workflow.findUnique({
               where: { id: workflowId },
               include: {
                 executions: {
@@ -95,7 +95,7 @@ class WorkflowService {
 
       const workflows = await this.prisma.executeQuery(
         async (prisma) => {
-          return await prisma.workflow.findMany({
+          return await prisma.Workflow.findMany({
             where,
             orderBy: { createdAt: 'desc' },
             take: filters.limit || 20,
@@ -124,7 +124,7 @@ class WorkflowService {
 
       const execution = await this.prisma.executeQuery(
         async (prisma) => {
-          return await prisma.workflowExecution.create({
+          return await prisma.WorkflowExecution.create({
             data: {
               id: executionId,
               workflowId,
@@ -171,7 +171,7 @@ class WorkflowService {
       
       const execution = await this.prisma.executeQuery(
         async (prisma) => {
-          const existing = await prisma.workflowExecution.findUnique({
+          const existing = await prisma.WorkflowExecution.findUnique({
             where: { id: executionId }
           });
 
@@ -182,7 +182,7 @@ class WorkflowService {
           const durationMs = completedAt ? 
             new Date(completedAt).getTime() - new Date(existing.startedAt).getTime() : null;
 
-          return await prisma.workflowExecution.update({
+          return await prisma.WorkflowExecution.update({
             where: { id: executionId },
             data: {
               status,
@@ -235,7 +235,7 @@ class WorkflowService {
 
       const execution = await this.prisma.executeQuery(
         async (prisma) => {
-          return await prisma.workflowExecution.findUnique({
+          return await prisma.WorkflowExecution.findUnique({
             where: { id: executionId },
             include: {
               workflow: true,
@@ -269,7 +269,7 @@ class WorkflowService {
     try {
       const step = await this.prisma.executeQuery(
         async (prisma) => {
-          return await prisma.workflowExecutionStep.create({
+          return await prisma.WorkflowExecutionStep.create({
             data: {
               executionId,
               stepId,
@@ -307,7 +307,7 @@ class WorkflowService {
     try {
       const step = await this.prisma.executeQuery(
         async (prisma) => {
-          const existing = await prisma.workflowExecutionStep.findFirst({
+          const existing = await prisma.WorkflowExecutionStep.findFirst({
             where: { executionId, stepId }
           });
 
@@ -319,7 +319,7 @@ class WorkflowService {
           const durationMs = existing.startedAt ? 
             completedAt.getTime() - new Date(existing.startedAt).getTime() : null;
 
-          return await prisma.workflowExecutionStep.update({
+          return await prisma.WorkflowExecutionStep.update({
             where: { id: existing.id },
             data: {
               status,
@@ -366,7 +366,7 @@ class WorkflowService {
     try {
       const executions = await this.prisma.executeQuery(
         async (prisma) => {
-          return await prisma.workflowExecution.findMany({
+          return await prisma.WorkflowExecution.findMany({
             where: {
               status: { in: ['pending', 'running'] }
             },
@@ -393,7 +393,7 @@ class WorkflowService {
     try {
       const execution = await this.prisma.executeQuery(
         async (prisma) => {
-          return await prisma.workflowExecution.create({
+          return await prisma.WorkflowExecution.create({
             data: {
               id: executionData.executionId,
               workflowId: executionData.workflowId,
@@ -415,6 +415,41 @@ class WorkflowService {
       return execution;
     } catch (error) {
       logger.error('❌ 워크플로우 실행 기록 생성 실패:', error);
+      throw error;
+    }
+  }
+
+  // 워크플로우 실행 기록 저장 (Chat Orchestrator에서 호출)
+  async saveExecution(executionRecord) {
+    try {
+      const execution = await this.prisma.executeQuery(
+        async (prisma) => {
+          return await prisma.WorkflowExecution.create({
+            data: {
+              id: executionRecord.id,
+              workflowId: executionRecord.workflow_id,
+              sessionId: executionRecord.session_id,
+              status: executionRecord.status,
+              startedAt: executionRecord.started_at,
+              completedAt: executionRecord.completed_at,
+              inputData: executionRecord.intent_data ? JSON.parse(executionRecord.intent_data) : {},
+              outputData: executionRecord.response_text ? {
+                response: executionRecord.response_text,
+                results: executionRecord.results_data 
+              } : null,
+              errorDetails: null,
+              durationMs: executionRecord.duration_ms,
+              executedBy: null // 현재 사용자 시스템 미구현
+            }
+          });
+        },
+        '워크플로우 실행 기록 저장 실패'
+      );
+
+      logger.info(`✅ 워크플로우 실행 기록 저장 완료: ${execution.id}`);
+      return execution;
+    } catch (error) {
+      logger.error('❌ 워크플로우 실행 기록 저장 실패:', error);
       throw error;
     }
   }
