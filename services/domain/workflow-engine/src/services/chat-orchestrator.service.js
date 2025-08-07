@@ -91,7 +91,7 @@ class ChatOrchestrator {
       return 'calculation';
     }
 
-    // 인프라 관련 키워드 + 충분한 길이
+    // 인프라 관련 키워드 + 충분한 길이 (조건 완화)
     if (this.isInfrastructureMessage(lowerMessage)) {
       return 'infrastructure';
     }
@@ -99,7 +99,7 @@ class ChatOrchestrator {
     return 'general';
   }
 
-  // 인프라 메시지 판별 (세밀한 조건)
+  // 인프라 메시지 판별 (조건 완화)
   isInfrastructureMessage(lowerMessage) {
     const infraKeywords = [
       '서버', 'cpu', 'memory', '메모리', '재시작', 'restart',
@@ -109,8 +109,14 @@ class ChatOrchestrator {
     ];
 
     const hasKeyword = infraKeywords.some(keyword => lowerMessage.includes(keyword));
-    const isLongEnough = lowerMessage.length > 5;
-    const hasActionIntent = /확인|체크|실행|시작|중지|재시작|모니터링|백업/.test(lowerMessage);
+    const isLongEnough = lowerMessage.length > 3; // 5 → 3으로 완화
+    const hasActionIntent = /확인|체크|실행|시작|중지|재시작|모니터링|백업|관리/.test(lowerMessage);
+
+    // 디버그 로그 추가
+    logger.info(`🔍 메시지 분류 디버그: "${lowerMessage}"`);
+    logger.info(`  - hasKeyword: ${hasKeyword}`);
+    logger.info(`  - isLongEnough: ${isLongEnough}`);
+    logger.info(`  - hasActionIntent: ${hasActionIntent}`);
 
     return hasKeyword && isLongEnough && hasActionIntent;
   }
@@ -1179,9 +1185,10 @@ class ChatOrchestrator {
     try {
       logger.info(`💾 실행 기록 저장: ${executionData.executionId}`);
 
+      // n8n ID와 UUID 모두 지원
       const executionRecord = {
         id: executionData.executionId,
-        workflow_id: executionData.workflowId,
+        workflow_id: String(executionData.workflowId || executionData.workflow_id),
         n8n_execution_id: executionData.n8nExecutionId,
         session_id: executionData.sessionId,
         intent_data: JSON.stringify(executionData.intent),
@@ -1196,6 +1203,12 @@ class ChatOrchestrator {
         created_at: new Date()
       };
 
+      // workflows 테이블 조회 생략 (n8n ID는 외부 관리)
+      if (!this.isValidUUID(executionRecord.workflow_id)) {
+        logger.info(`🔗 n8n 외부 워크플로우 사용: ${executionRecord.workflow_id}`);
+        // workflows 테이블 체크 스킵
+      }
+
       await workflowService.saveExecution(executionRecord);
       
       await redisService.addSessionExecution(
@@ -1207,7 +1220,14 @@ class ChatOrchestrator {
 
     } catch (storageError) {
       logger.error(`❌ 실행 기록 저장 실패: ${executionData.executionId}`, storageError);
+      // 저장 실패는 무시하고 계속 진행
     }
+  }
+
+  // UUID 검증 헬퍼 메서드 추가
+  isValidUUID(str) {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    return uuidRegex.test(str);
   }
 
   // 🎯 간단한 메시지 처리 메서드들

@@ -557,13 +557,18 @@ class N8nEngineService {
                 duration: mcpResponse.data.duration
             });
             
-            // MCP 워크플로우 생성 (추적용)
-            const mcpWorkflow = await this.createMCPExecutionWorkflow(inputData);
+            // MCP 실행 추적용 메타데이터만 저장 (새 워크플로우 생성하지 않음)
+            const executionMetadata = {
+                tool: inputData.tool,
+                params: inputData.params,
+                timestamp: Date.now()
+            };
+            logger.info(`📌 MCP 도구 실행 추적:`, executionMetadata);
             
-            // 실제 MCP 결과 반환
+            // 실제 MCP 결과 반환 (워크플로우 ID는 호출자가 관리)
             return {
                 id: `mcp_exec_${Date.now()}`,
-                workflowId: mcpWorkflow.id,
+                workflowId: null,  // 워크플로우 ID는 LLM이 선택한 것을 사용
                 status: 'completed',
                 data: {
                     message: '실제 MCP 도구를 통한 시스템 상태 확인 완료',
@@ -589,7 +594,9 @@ class N8nEngineService {
     
     /**
      * MCP 실행을 위한 워크플로우 동적 생성 (Webhook Trigger 사용)
+     * @deprecated Universal Automation Workflow를 재사용하도록 변경됨
      */
+    /*
     async createMCPExecutionWorkflow(inputData) {
         const timestamp = Date.now();
         const webhookPath = `mcp-execute-${timestamp}`;
@@ -657,6 +664,7 @@ class N8nEngineService {
         
         return createdWorkflow;
     }
+    */
     
     /**
      * 단계 타입을 n8n 노드 타입으로 매핑

@@ -18,7 +18,6 @@ model Workflow {
   createdBy   String?             @map("created_by") @db.Uuid
   createdAt   DateTime?           @default(now()) @map("created_at") @db.Timestamp(6)
   updatedAt   DateTime?           @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
-  executions  WorkflowExecution[]
   users       users?              @relation(fields: [createdBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([name, version], map: "unique_workflow_name_version")
@@ -29,7 +28,7 @@ model Workflow {
 
 model WorkflowExecution {
   id           String                  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  workflowId   String                  @map("workflow_id") @db.VarChar(50) // n8n 워크플로우 ID (UUID 아님)
+  workflowId   String                  @map("workflow_id") @db.VarChar(255) // n8n 워크플로우 ID (UUID 아님)
   sessionId    String?                 @map("session_id") @db.Uuid
   status       String                  @default("pending") @db.VarChar(20)
   inputData    Json?                   @map("input_data")
@@ -41,7 +40,6 @@ model WorkflowExecution {
   executedBy   String?                 @map("executed_by") @db.Uuid
   steps        WorkflowExecutionStep[]
   users        users?                  @relation(fields: [executedBy], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  workflow     Workflow                @relation(fields: [workflowId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([startedAt], map: "idx_workflow_executions_started_at")
   @@index([status], map: "idx_workflow_executions_status")

@@ -1,0 +1,109 @@
+{
+  "name": "Universal Automation Workflow",
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "timezone": "Asia/Seoul"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "universal-automation",
+        "responseMode": "onReceived",
+        "responseData": "allEntries",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// 요청 데이터 파싱\nconst requestData = $json;\nconst intent = requestData.intent || {};\nconst entities = requestData.entities || {};\nconst sessionId = requestData.sessionId;\nconst originalMessage = requestData.originalMessage;\n\n// 로깅\nconsole.log('Intent:', intent);\nconsole.log('Entities:', entities);\n\nreturn {\n  intent: intent.intent || 'unknown',\n  entities: entities,\n  sessionId: sessionId,\n  originalMessage: originalMessage,\n  timestamp: new Date().toISOString()\n};"
+      },
+      "id": "parse-request",
+      "name": "Parse Request",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://automation-device-service:8101/api/v1/devices",
+        "options": {},
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        }
+      },
+      "id": "get-devices",
+      "name": "Get Devices",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://automation-mcp-service:8201/api/v1/mcp/execute",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "serverId",
+              "value": "={{ $json.serverId }}"
+            },
+            {
+              "name": "tool",
+              "value": "={{ $json.tool }}"
+            },
+            {
+              "name": "params",
+              "value": "={{ $json.params }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "execute-mcp",
+      "name": "Execute MCP Tool",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// 결과 정리 및 포맷팅\nconst results = $items();\nconst summary = {\n  success: true,\n  deviceCount: 0,\n  results: [],\n  timestamp: new Date().toISOString()\n};\n\n// 결과 처리\nresults.forEach(item => {\n  if (item.json.items) {\n    summary.deviceCount = item.json.items.length;\n    summary.results = item.json.items;\n  }\n});\n\nreturn summary;"
+      },
+      "id": "format-response",
+      "name": "Format Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1050, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [[{"node": "Parse Request", "type": "main", "index": 0}]]
+    },
+    "Parse Request": {
+      "main": [[{"node": "Get Devices", "type": "main", "index": 0}]]
+    },
+    "Get Devices": {
+      "main": [[{"node": "Execute MCP Tool", "type": "main", "index": 0}]]
+    },
+    "Execute MCP Tool": {
+      "main": [[{"node": "Format Response", "type": "main", "index": 0}]]
+    }
+  }
+}

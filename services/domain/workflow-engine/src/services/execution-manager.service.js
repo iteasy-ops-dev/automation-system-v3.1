@@ -9,6 +9,7 @@ const config = require('../config');
 class ExecutionManager {
   constructor() {
     this.workflowService = workflowService;
+    this.n8nEngine = n8nEngine;
     this.executionQueue = [];
     this.activeExecutions = new Map();
     this.isProcessing = false;
@@ -90,6 +91,20 @@ class ExecutionManager {
     const { workflowId, executionId, definition } = executionInfo;
 
     try {
+      // n8n 외부 워크플로우인 경우 n8n API 직접 호출
+      if (!definition || executionInfo.external) {
+        logger.info(`🔗 n8n 외부 워크플로우 실행: ${workflowId}`);
+        
+        // n8n 엔진 서비스를 통해 실행
+        const n8nResult = await this.n8nEngine.executeWorkflow(workflowId, {
+          executionId,
+          inputData: executionInfo.inputData
+        });
+        
+        return n8nResult;
+      }
+
+      // 내부 워크플로우 실행 (기존 로직)
       let stepResults = {};
       let currentStepIndex = 0;
       const totalSteps = definition.nodes?.length || 0;

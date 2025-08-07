@@ -14,10 +14,10 @@ class WorkflowService {
     try {
       const workflow = await this.prisma.executeQuery(
         async (prisma) => {
-          return await prisma.Workflow.create({
-          data: {
-          id: uuidv4(),
-            name: data.name,
+          return await prisma.workflow.create({
+            data: {
+              id: uuidv4(),
+              name: data.name,
               description: data.description,
               definition: data.definition,
               version: data.version || 1,
@@ -44,20 +44,20 @@ class WorkflowService {
   // 워크플로우 조회
   async getWorkflow(workflowId) {
     try {
+      // n8n 워크플로우인 경우 DB 조회 스킵
+      if (!this.isValidUUID(workflowId)) {
+        logger.info(`📝 n8n 외부 워크플로우 조회 스킵: ${workflowId}`);
+        return { id: workflowId, definition: null, external: true };
+      }
+
       // 캐시에서 먼저 확인
       let definition = await redisService.getWorkflowDefinition(workflowId);
       
       if (!definition) {
         const workflow = await this.prisma.executeQuery(
           async (prisma) => {
-            return await prisma.Workflow.findUnique({
-              where: { id: workflowId },
-              include: {
-                executions: {
-                  take: 10,
-                  orderBy: { startedAt: 'desc' }
-                }
-              }
+            return await prisma.workflow.findUnique({
+              where: { id: workflowId }
             });
           },
           '워크플로우 조회 실패'
@@ -95,16 +95,11 @@ class WorkflowService {
 
       const workflows = await this.prisma.executeQuery(
         async (prisma) => {
-          return await prisma.Workflow.findMany({
+          return await prisma.workflow.findMany({
             where,
             orderBy: { createdAt: 'desc' },
             take: filters.limit || 20,
-            skip: filters.offset || 0,
-            include: {
-              _count: {
-                select: { executions: true }
-              }
-            }
+            skip: filters.offset || 0
           });
         },
         '워크플로우 목록 조회 실패'
@@ -122,9 +117,20 @@ class WorkflowService {
     try {
       const executionId = uuidv4();
 
+      // 워크플로우 존재 확인 (외부 n8n 워크플로우는 스킵)
+      if (this.isValidUUID(workflowId)) {
+        const workflow = await this.getWorkflow(workflowId);
+        if (!workflow) {
+          throw new Error(`워크플로우를 찾을 수 없습니다: ${workflowId}`);
+        }
+      } else {
+        logger.info(`📝 n8n 외부 워크플로우 사용: ${workflowId}`);
+      }
+
+      // 실행 기록 생성
       const execution = await this.prisma.executeQuery(
         async (prisma) => {
-          return await prisma.WorkflowExecution.create({
+          return await prisma.workflowExecution.create({
             data: {
               id: executionId,
               workflowId,
@@ -133,9 +139,6 @@ class WorkflowService {
               inputData,
               executedBy,
               startedAt: new Date()
-            },
-            include: {
-              workflow: true
             }
           });
         },
@@ -143,18 +146,15 @@ class WorkflowService {
       );
 
       // Redis에 실행 상태 저장
-      await redisService.setExecutionStatus(executionId, 'pending', 0);
-
-      // 세션 매핑 추가
-      if (sessionId) {
-        await redisService.addSessionExecution(sessionId, executionId);
-      }
+      await redisService.setExecutionStatus(executionId, 'pending');
 
       // Kafka 이벤트 발행
-      await kafkaService.publishWorkflowStarted(workflowId, executionId, {
+      await kafkaService.publishWorkflowStarted(
+        workflowId,
+        executionId,
         sessionId,
         inputData
-      });
+      );
 
       logger.info(`✅ 워크플로우 실행 시작: ${executionId} (워크플로우: ${workflowId})`);
       return execution;
@@ -171,7 +171,7 @@ class WorkflowService {
       
       const execution = await this.prisma.executeQuery(
         async (prisma) => {
-          const existing = await prisma.WorkflowExecution.findUnique({
+          const existing = await prisma.workflowExecution.findUnique({
             where: { id: executionId }
           });
 
@@ -182,7 +182,7 @@ class WorkflowService {
           const durationMs = completedAt ? 
             new Date(completedAt).getTime() - new Date(existing.startedAt).getTime() : null;
 
-          return await prisma.WorkflowExecution.update({
+          return await prisma.workflowExecution.update({
             where: { id: executionId },
             data: {
               status,
@@ -190,9 +190,6 @@ class WorkflowService {
               errorDetails,
               completedAt,
               durationMs
-            },
-            include: {
-              workflow: true
             }
           });
         },
@@ -235,10 +232,9 @@ class WorkflowService {
 
       const execution = await this.prisma.executeQuery(
         async (prisma) => {
-          return await prisma.WorkflowExecution.findUnique({
+          return await prisma.workflowExecution.findUnique({
             where: { id: executionId },
             include: {
-              workflow: true,
               steps: {
                 orderBy: { startedAt: 'asc' }
               }
@@ -269,7 +265,7 @@ class WorkflowService {
     try {
       const step = await this.prisma.executeQuery(
         async (prisma) => {
-          return await prisma.WorkflowExecutionStep.create({
+          return await prisma.workflowExecutionStep.create({
             data: {
               executionId,
               stepId,
@@ -307,7 +303,7 @@ class WorkflowService {
     try {
       const step = await this.prisma.executeQuery(
         async (prisma) => {
-          const existing = await prisma.WorkflowExecutionStep.findFirst({
+          const existing = await prisma.workflowExecutionStep.findFirst({
             where: { executionId, stepId }
           });
 
@@ -319,7 +315,7 @@ class WorkflowService {
           const durationMs = existing.startedAt ? 
             completedAt.getTime() - new Date(existing.startedAt).getTime() : null;
 
-          return await prisma.WorkflowExecutionStep.update({
+          return await prisma.workflowExecutionStep.update({
             where: { id: existing.id },
             data: {
               status,
@@ -334,126 +330,135 @@ class WorkflowService {
       );
 
       // Kafka 이벤트 발행
-      if (status === 'completed') {
-        await kafkaService.publishWorkflowStepCompleted(
-          step.executionId,
-          executionId,
-          stepId,
-          step.stepName,
-          outputData,
-          step.durationMs
-        );
-      } else if (status === 'failed') {
-        await kafkaService.publishWorkflowStepFailed(
-          step.executionId,
-          executionId,
-          stepId,
-          step.stepName,
-          errorDetails
-        );
-      }
+      await kafkaService.publishWorkflowStepCompleted(
+        step.executionId,
+        executionId,
+        stepId,
+        step.stepName,
+        status,
+        step.durationMs
+      );
 
-      logger.debug(`워크플로우 단계 완료: ${executionId}/${stepId} -> ${status}`);
+      logger.debug(`워크플로우 단계 완료: ${executionId} -> ${step.stepName} (${status})`);
       return step;
     } catch (error) {
-      logger.error(`❌ 워크플로우 실행 단계 완료 실패: ${executionId}/${stepId}`, error);
+      logger.error(`❌ 워크플로우 실행 단계 완료 실패: ${executionId}`, error);
       throw error;
     }
   }
 
-  // 실행 중인 워크플로우 목록
-  async getRunningExecutions() {
+  // 워크플로우 실행 목록 조회
+  async getExecutions(workflowId, limit = 10) {
     try {
       const executions = await this.prisma.executeQuery(
         async (prisma) => {
-          return await prisma.WorkflowExecution.findMany({
-            where: {
-              status: { in: ['pending', 'running'] }
-            },
+          return await prisma.workflowExecution.findMany({
+            where: { workflowId },
+            orderBy: { startedAt: 'desc' },
+            take: limit,
             include: {
-              workflow: {
-                select: { name: true }
+              steps: {
+                orderBy: { startedAt: 'asc' }
               }
-            },
-            orderBy: { startedAt: 'desc' }
+            }
           });
         },
-        '실행 중인 워크플로우 조회 실패'
+        '워크플로우 실행 목록 조회 실패'
       );
 
       return executions;
     } catch (error) {
-      logger.error('❌ 실행 중인 워크플로우 조회 실패:', error);
+      logger.error(`❌ 워크플로우 실행 목록 조회 실패: ${workflowId}`, error);
       throw error;
     }
   }
 
-  // 워크플로우 실행 기록 생성 (TASK-WF-001에서 필요)
-  async createExecution(executionData) {
+  // 사용자별 실행 목록 조회
+  async getUserExecutions(userId, limit = 20) {
     try {
-      const execution = await this.prisma.executeQuery(
+      const executions = await this.prisma.executeQuery(
         async (prisma) => {
-          return await prisma.WorkflowExecution.create({
-            data: {
-              id: executionData.executionId,
-              workflowId: executionData.workflowId,
-              sessionId: executionData.sessionId,
-              status: executionData.status,
-              startedAt: executionData.startedAt,
-              completedAt: executionData.completedAt || null,
-              input: executionData.intent ? JSON.stringify(executionData.intent) : '{}',
-              output: executionData.response ? JSON.stringify({ response: executionData.response }) : null,
-              error: executionData.error || null,
-              metadata: executionData.summary ? JSON.stringify(executionData.summary) : '{}'
+          return await prisma.workflowExecution.create({
+            where: { executedBy: userId },
+            orderBy: { startedAt: 'desc' },
+            take: limit,
+            select: {
+              id: true,
+              workflowId: true,
+              status: true,
+              startedAt: true,
+              completedAt: true,
+              durationMs: true
             }
           });
         },
-        '워크플로우 실행 기록 생성 실패'
+        '사용자 실행 목록 조회 실패'
       );
 
-      logger.info(`✅ 워크플로우 실행 기록 생성: ${execution.id}`);
-      return execution;
+      return executions;
     } catch (error) {
-      logger.error('❌ 워크플로우 실행 기록 생성 실패:', error);
+      logger.error(`❌ 사용자 실행 목록 조회 실패: ${userId}`, error);
       throw error;
     }
   }
 
-  // 워크플로우 실행 기록 저장 (Chat Orchestrator에서 호출)
-  async saveExecution(executionRecord) {
+  // 실행 기록 저장 (n8n 워크플로우용)
+  async saveExecution(executionData) {
     try {
+      // workflow_id를 강제로 문자열로 변환
+      const sanitizedData = {
+        ...executionData,
+        workflow_id: String(executionData.workflow_id || executionData.workflowId),
+        id: executionData.id || uuidv4(),
+        started_at: executionData.started_at || new Date(),
+        status: executionData.status || 'running'
+      };
+
+      // workflow_id가 n8n ID인지 UUID인지 확인
+      const isN8nId = !this.isValidUUID(sanitizedData.workflow_id);
+      
+      if (isN8nId) {
+        logger.info(`📝 n8n 워크플로우 ID 사용: ${sanitizedData.workflow_id}`);
+      }
+
       const execution = await this.prisma.executeQuery(
         async (prisma) => {
-          return await prisma.WorkflowExecution.create({
+          return await prisma.workflowExecution.create({
             data: {
-              id: executionRecord.id,
-              workflowId: executionRecord.workflow_id,
-              sessionId: executionRecord.session_id,
-              status: executionRecord.status,
-              startedAt: executionRecord.started_at,
-              completedAt: executionRecord.completed_at,
-              inputData: executionRecord.intent_data ? JSON.parse(executionRecord.intent_data) : {},
-              outputData: executionRecord.response_text ? {
-                response: executionRecord.response_text,
-                results: executionRecord.results_data 
-              } : null,
-              errorDetails: null,
-              durationMs: executionRecord.duration_ms,
-              executedBy: null // 현재 사용자 시스템 미구현
+              id: sanitizedData.id,
+              workflowId: sanitizedData.workflow_id,
+              sessionId: sanitizedData.session_id,
+              status: sanitizedData.status,
+              inputData: sanitizedData.intent_data ? JSON.parse(sanitizedData.intent_data) : sanitizedData.inputData || {},
+              outputData: sanitizedData.response_text ? {
+                response: sanitizedData.response_text,
+                results: sanitizedData.results_data 
+              } : sanitizedData.outputData || null,
+              errorDetails: sanitizedData.error_details || null,
+              startedAt: sanitizedData.started_at,
+              completedAt: sanitizedData.completed_at || null,
+              durationMs: sanitizedData.duration_ms || null,
+              executedBy: sanitizedData.executed_by || null
             }
           });
         },
         '워크플로우 실행 기록 저장 실패'
       );
 
-      logger.info(`✅ 워크플로우 실행 기록 저장 완료: ${execution.id}`);
+      logger.info(`✅ 워크플로우 실행 기록 저장: ${execution.id}`);
       return execution;
+      
     } catch (error) {
-      logger.error('❌ 워크플로우 실행 기록 저장 실패:', error);
+      logger.error(`❌ 워크플로우 실행 기록 저장 실패:`, error);
       throw error;
     }
   }
 
+  // UUID 검증 헬퍼 메서드
+  isValidUUID(str) {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    return uuidRegex.test(str);
+  }
 }
 
 module.exports = new WorkflowService();
